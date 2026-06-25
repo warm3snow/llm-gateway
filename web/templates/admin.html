@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.title}}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .card {
+            border: none;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        }
+        .nav-pils .nav-link {
+            border-radius: 10px;
+            margin: 5px 0;
+            color: #667eea;
+        }
+        .nav-pils .nav-link.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .stat-card h3 {
+            font-size: 2rem;
+            font-weight: bold;
+        }
+        .provider-card {
+            border-left: 4px solid #667eea;
+            margin-bottom: 15px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+        }
+        .provider-card.enabled {
+            border-left-color: #28a745;
+        }
+        .status-badge {
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+        }
+        .status-badge.enabled {
+            background: #d4edda;
+            color: #155724;
+        }
+        .status-badge.disabled {
+            background: #f8d7da;
+            color: #721c24;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row min-vh-100">
+            <!-- Sidebar -->
+            <div class="col-md-3 col-lg-2 d-md-block bg-white vh-100 p-3 shadow" style="position: fixed; left: 0; top: 0; width: 250px; z-index: 100;">
+                <div class="text-center mb-4 mt-3">
+                    <h3 class="text-primary"><i class="bi bi-robot"></i> LLM Gateway</h3>
+                    <p class="text-muted small">Admin Dashboard</p>
+                </div>
+                
+                <ul class="nav nav-pils flex-column">
+                    <li class="nav-item">
+                        <a class="nav-link active" href="#" data-section="dashboard">
+                            <i class="bi bi-speedometer2"></i> Dashboard
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" data-section="providers">
+                            <i class="bi bi-boxes"></i> Providers
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" data-section="config">
+                            <i class="bi bi-gear"></i> Configuration
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" data-section="logs">
+                            <i class="bi bi-journal-text"></i> Logs
+                        </a>
+                    </li>
+                    <li class="nav-item mt-auto">
+                        <a class="nav-link text-danger" href="#" id="logoutBtn">
+                            <i class="bi bi-box-arrow-right"></i> Logout
+                        </a>
+                    </li>
+                </ul>
+            </div>
+
+            <!-- Main Content -->
+            <div class="col-md-9 col-lg-10 ml-sm-auto p-4" style="margin-left: 250px;">
+                <!-- Dashboard Section -->
+                <div id="section-dashboard" class="section-content">
+                    <h2 class="mb-4">Dashboard</h2>
+                    
+                    <div class="row mb-4">
+                        <div class="col-md-3">
+                            <div class="stat-card">
+                                <h5>Total Requests</h5>
+                                <h3 id="stat-total-requests">0</h3>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="stat-card">
+                                <h5>Success Rate</h5>
+                                <h3 id="stat-success-rate">0%</h3>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="stat-card">
+                                <h5>Avg Latency</h5>
+                                <h3 id="stat-avg-latency">0ms</h3>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="stat-card">
+                                <h5>Active Providers</h5>
+                                <h3 id="stat-providers">0</h3>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-8">
+                            <div class="card p-4">
+                                <h5>Requests Over Time</h5>
+                                <canvas id="requestsChart" style="height: 300px;"></canvas>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="card p-4">
+                                <h5>Provider Usage</h5>
+                                <canvas id="providerChart" style="height: 300px;"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Providers Section -->
+                <div id="section-providers" class="section-content" style="display: none;">
+                    <div class="d-flex justify-content-between align-items-center mb-4">
+                        <h2>Providers</h2>
+                        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addProviderModal">
+                            <i class="bi bi-plus-circle"></i> Add Provider
+                        </button>
+                    </div>
+
+                    <div id="providers-list">
+                        <!-- Providers will be loaded here -->
+                    </div>
+                </div>
+
+                <!-- Configuration Section -->
+                <div id="section-config" class="section-content" style="display: none;">
+                    <h2 class="mb-4">Configuration</h2>
+
+                    <div class="card p-4">
+                        <form id="configForm">
+                            <div class="mb-3">
+                                <label class="form-label">Default Provider</label>
+                                <select class="form-select" id="defaultProvider" name="gateway.defaultProvider">
+                                    <option value="openai">OpenAI</option>
+                                    <option value="anthropic">Anthropic</option>
+                                    <option value="google">Google</option>
+                                    <option value="ollama">Ollama</option>
+                                </select>
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label">Max Request Timeout (ms)</label>
+                                <input type="number" class="form-control" id="maxRequestTimeout" name="gateway.maxRequestTimeout" value="120000">
+                            </div>
+
+                            <div class="mb-3 form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="guardrailsEnabled" name="gateway.guardrailsEnabled">
+                                <label class="form-check-label" for="guardrailsEnabled">Enable Guardrails</label>
+                            </div>
+
+                            <div class="mb-3 form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="cacheEnabled" name="cache.enabled">
+                                <label class="form-check-label" for="cacheEnabled">Enable Cache</label>
+                            </div>
+
+                            <button type="submit" class="btn btn-primary">Save Configuration</button>
+                        </form>
+                    </div>
+                </div>
+
+                <!-- Logs Section -->
+                <div id="section-logs" class="section-content" style="display: none;">
+                    <h2 class="mb-4">Logs</h2>
+
+                    <div class="card p-4">
+                        <div class="mb-3">
+                            <select class="form-select w-auto d-inline" id="logLevel">
+                                <option value="all">All Levels</option>
+                                <option value="info">Info</option>
+                                <option value="warn">Warning</option>
+                                <option value="error">Error</option>
+                            </select>
+                            <button class="btn btn-sm btn-outline-secondary ms-2" id="refreshLogs">Refresh</button>
+                        </div>
+
+                        <div id="logs-container" style="height: 500px; overflow-y: auto; background: #f8f9fa; padding: 15px; border-radius: 8px;">
+                            <!-- Logs will be loaded here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Provider Modal -->
+    <div class="modal fade" id="addProviderModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Add Provider</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <form id="addProviderForm">
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label class="form-label">Provider Name</label>
+                            <input type="text" class="form-control" id="providerName" required>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Provider Type</label>
+                            <select class="form-select" id="providerType" required>
+                                <option value="openai">OpenAI</option>
+                                <option value="anthropic">Anthropic</option>
+                                <option value="google">Google</option>
+                                <option value="azure-openai">Azure OpenAI</option>
+                                <option value="cohere">Cohere</option>
+                                <option value="mistral-ai">Mistral AI</option>
+                                <option value="ollama">Ollama</option>
+                                <option value="groq">Groq</option>
+                            </select>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">API Key</label>
+                            <input type="password" class="form-control" id="providerApiKey">
+                            <div class="form-text">Leave empty for local providers like Ollama</div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Custom Host</label>
+                            <input type="text" class="form-control" id="providerCustomHost" placeholder="https://api.example.com/v1">
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Weight (for load balancing)</label>
+                            <input type="number" class="form-control" id="providerWeight" value="1" min="1" max="100">
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Add Provider</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.0.0/dist/chart.umd.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
+    <script>
+        // Navigation
+        $(document).ready(function() {
+            $('.nav-link').click(function(e) {
+                e.preventDefault();
+                var section = $(this).data('section');
+                
+                // Update active nav
+                $('.nav-link').removeClass('active');
+                $(this).addClass('active');
+                
+                // Show section
+                $('.section-content').hide();
+                $('#section-' + section).fadeIn();
+                
+                // Load data
+                if (section === 'dashboard') {
+                    loadDashboard();
+                } else if (section === 'providers') {
+                    loadProviders();
+                } else if (section === 'config') {
+                    loadConfig();
+                } else if (section === 'logs') {
+                    loadLogs();
+                }
+            });
+            
+            // Load initial data
+            loadDashboard();
+            loadProviders();
+        });
+
+        // Dashboard
+        function loadDashboard() {
+            $.get('/api/v1/admin/stats', function(data) {
+                if (data.status === 'success') {
+                    $('#stat-total-requests').text(data.stats.totalRequests || 0);
+                    $('#stat-providers').text(data.stats.providersCount || 0);
+                    $('#stat-avg-latency').text(data.stats.averageLatency || '0ms');
+                    
+                    var successRate = 0;
+                    if (data.stats.totalRequests > 0) {
+                        successRate = (data.stats.successfulRequests / data.stats.totalRequests * 100).toFixed(1);
+                    }
+                    $('#stat-success-rate').text(successRate + '%');
+                }
+            });
+        }
+
+        // Providers
+        function loadProviders() {
+            $.get('/api/v1/admin/providers', function(data) {
+                if (data.status === 'success') {
+                    var html = '';
+                    data.providers.forEach(function(provider) {
+                        html += `
+                            <div class="provider-card ` + (provider.enabled ? 'enabled' : '') + `">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <h5>` + provider.name + ` <span class="status-badge ` + (provider.enabled ? 'enabled' : 'disabled') + `">` + (provider.enabled ? 'Enabled' : 'Disabled') + `</span></h5>
+                                        <p class="text-muted mb-1">Type: ` + provider.provider + `</p>
+                                        <small class="text-muted">API Key: ` + provider.apiKey + `</small><br>
+                                        <small class="text-muted">Weight: ` + provider.weight + ` | Timeout: ` + provider.requestTimeout + `ms</small>
+                                    </div>
+                                    <div>
+                                        <button class="btn btn-sm btn-outline-primary me-2" onclick="editProvider('` + provider.name + `')">
+                                            <i class="bi bi-pencil"></i>
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-danger" onclick="removeProvider('` + provider.name + `')">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    $('#providers-list').html(html);
+                }
+            });
+        }
+
+        // Add Provider
+        $('#addProviderForm').submit(function(e) {
+            e.preventDefault();
+            
+            var data = {
+                name: $('#providerName').val(),
+                provider: $('#providerType').val(),
+                apiKey: $('#providerApiKey').val(),
+                customHost: $('#providerCustomHost').val(),
+                weight: parseInt($('#providerWeight').val())
+            };
+            
+            $.ajax({
+                url: '/api/v1/admin/providers',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify(data),
+                success: function(response) {
+                    if (response.status === 'success') {
+                        $('#addProviderModal').modal('hide');
+                        $('#addProviderForm')[0].reset();
+                        loadProviders();
+                        alert('Provider added successfully!');
+                    } else {
+                        alert('Error: ' + response.error);
+                    }
+                },
+                error: function(xhr) {
+                    alert('Error: ' + xhr.responseJSON.error);
+                }
+            });
+        });
+
+        // Remove Provider
+        function removeProvider(name) {
+            if (confirm('Are you sure you want to remove ' + name + '?')) {
+                $.ajax({
+                    url: '/api/v1/admin/providers/' + name,
+                    type: 'DELETE',
+                    success: function(response) {
+                        if (response.status === 'success') {
+                            loadProviders();
+                            alert('Provider removed successfully!');
+                        } else {
+                            alert('Error: ' + response.error);
+                        }
+                    },
+                    error: function(xhr) {
+                        alert('Error: ' + xhr.responseJSON.error);
+                    }
+                });
+            }
+        }
+
+        // Config
+        function loadConfig() {
+            $.get('/api/v1/admin/config', function(data) {
+                if (data.status === 'success') {
+                    var config = data.config;
+                    $('#defaultProvider').val(config.gateway.defaultProvider);
+                    $('#maxRequestTimeout').val(config.gateway.maxRequestTimeout);
+                    $('#guardrailsEnabled').prop('checked', config.gateway.guardrailsEnabled);
+                    $('#cacheEnabled').prop('checked', config.cache.enabled);
+                }
+            });
+        }
+
+        $('#configForm').submit(function(e) {
+            e.preventDefault();
+            
+            var config = {
+                gateway: {
+                    defaultProvider: $('#defaultProvider').val(),
+                    maxRequestTimeout: parseInt($('#maxRequestTimeout').val()),
+                    guardrailsEnabled: $('#guardrailsEnabled').is(':checked')
+                },
+                cache: {
+                    enabled: $('#cacheEnabled').is(':checked')
+                }
+            };
+            
+            $.ajax({
+                url: '/api/v1/admin/config',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify(config),
+                success: function(response) {
+                    if (response.status === 'success') {
+                        alert('Configuration saved successfully!');
+                    } else {
+                        alert('Error: ' + response.error);
+                    }
+                },
+                error: function(xhr) {
+                    alert('Error: ' + xhr.responseJSON.error);
+                }
+            });
+        });
+
+        // Logs
+        function loadLogs() {
+            // In a real implementation, this would fetch from an API
+            var logs = [
+                {time: '2024-01-15 10:23:45', level: 'info', message: 'Request to OpenAI completed in 234ms'},
+                {time: '2024-01-15 10:23:40', level: 'warn', message: 'Rate limit warning for Anthropic'},
+                {time: '2024-01-15 10:23:35', level: 'error', message: 'Failed to connect to Google API'},
+            ];
+            
+            var html = '';
+            logs.forEach(function(log) {
+                var badgeClass = 'bg-success';
+                if (log.level === 'warn') badgeClass = 'bg-warning';
+                if (log.level === 'error') badgeClass = 'bg-danger';
+                
+                html += `
+                    <div class="mb-2">
+                        <span class="badge ` + badgeClass + `">` + log.level.toUpperCase() + `</span>
+                        <small class="text-muted ms-2">` + log.time + `</small>
+                        <span class="ms-2">` + log.message + `</span>
+                    </div>
+                `;
+            });
+            
+            $('#logs-container').html(html);
+        }
+
+        $('#refreshLogs').click(function() {
+            loadLogs();
+        });
+
+        // Logout
+        $('#logoutBtn').click(function(e) {
+            e.preventDefault();
+            if (confirm('Are you sure you want to logout?')) {
+                window.location.href = '/';
+            }
+        });
+    </script>
+</body>
+</html>

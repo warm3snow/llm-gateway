@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  llm-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: llm-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - LLM_GATEWAY_CONFIG_PATH=/app/configs/config.yaml
+    volumes:
+      - ./configs:/app/configs
+      - ./logs:/app/logs
+    restart: unless-stopped
+    networks:
+      - llm-gateway-network
+
+  redis:
+    image: redis:alpine
+    container_name: llm-gateway-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    networks:
+      - llm-gateway-network
+    command: redis-server --appendonly yes
+
+  nginx:
+    image: nginx:alpine
+    container_name: llm-gateway-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - llm-gateway
+    restart: unless-stopped
+    networks:
+      - llm-gateway-network
+
+networks:
+  llm-gateway-network:
+    driver: bridge
+
+volumes:
+  redis-data:
+    driver: local

@@ -1,0 +1,60 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+llm-gateway
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Go workspace file
+go.work
+
+# Dependency directories (remove if it is needed)
+vendor/
+
+# IDE-specific files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Configuration overrides
+configs/config.local.yaml
+configs/config.dev.yaml
+configs/config.prod.yaml
+
+# Logs
+*.log
+logs/
+
+# Build artifacts
+/dist
+/build
+/release
+
+# Test coverage
+coverage.txt
+coverage.html
+*.coverprofile
+
+# Temporary files
+/tmp
+/temp
+*.tmp
+
+# OS-specific files
+Thumbs.db
+Desktop.ini

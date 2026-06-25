@@ -1,0 +1,78 @@
+# LLM Gateway Configuration
+
+server:
+  host: "0.0.0.0"
+  port: 8080
+  readTimeout: 60s
+  writeTimeout: 60s
+  shutdownTimeout: 30s
+  mode: "debug"  # debug, release, test
+
+gateway:
+  defaultProvider: "openai"
+  guardrailsEnabled: true
+  maxRequestTimeout: 120000  # milliseconds
+  supportedProviders:
+    - "openai"
+    - "anthropic"
+    - "google"
+    - "azure-openai"
+    - "cohere"
+    - "mistral-ai"
+    - "together-ai"
+    - "ollama"
+    - "groq"
+    - "deepseek"
+    - "bedrock"
+    - "replicate"
+    - "huggingface"
+    - "vertex-ai"
+  
+  # Provider configurations
+  providers:
+    openai:
+      provider: "openai"
+      apiKey: "${OPENAI_API_KEY}"  # Environment variable
+      customHost: ""
+      forwardHeaders: []
+    
+    anthropic:
+      provider: "anthropic"
+      apiKey: "${ANTHROPIC_API_KEY}"
+      customHost: "https://api.anthropic.com/v1"
+    
+    google:
+      provider: "google"
+      apiKey: "${GOOGLE_API_KEY}"
+      customHost: "https://generativelanguage.googleapis.com/v1"
+    
+    ollama:
+      provider: "ollama"
+      customHost: "http://localhost:11434/v1"
+      apiKey: "o1lama"  # Ollama doesn't need real API key
+    
+    groq:
+      provider: "groq"
+      apiKey: "${GROQ_API_KEY}"
+      customHost: "https://api.groq.com/openai/v1"
+
+cache:
+  enabled: false
+  type: "memory"  # memory, redis
+  defaultTTL: 5m
+  redis:
+    addr: "localhost:6379"
+    password: ""
+    db: 0
+
+logging:
+  level: "info"  # debug, info, warn, error
+  format: "json"  # json, text
+  outputPath: "stdout"  # stdout, file path
+
+security:
+  apiKeyHeader: "x-llm-gateway-api-key"
+  allowedOrigins:
+    - "*"
+  rateLimitEnabled: false
+  rateLimit: 100  # requests per minute
