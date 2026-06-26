@@ -184,6 +184,30 @@ type ProviderResponse struct {
 	Error      error
 }
 
+// ChatCompletionResponse 聊天补全响应
+type ChatCompletionResponse struct {
+	ID      string   `json:"id"`
+	Object  string   `json:"object"`
+	Created int64    `json:"created"`
+	Model   string   `json:"model"`
+	Choices []Choice `json:"choices"`
+	Usage   Usage    `json:"usage"`
+}
+
+// Choice 选择
+type Choice struct {
+	Index        int         `json:"index"`
+	Message      Message     `json:"message"`
+	FinishReason string      `json:"finish_reason"`
+}
+
+// Usage 使用情况
+type Usage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+}
+
 // StreamResponse 流式响应
 type StreamResponse struct {
 	Data  []byte
