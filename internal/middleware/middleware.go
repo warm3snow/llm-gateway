@@ -2,45 +2,57 @@ package middleware
 
 import (
 	"context"
-	"log"
+	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
 )
 
-// Logger 日志中间件
+// Logger 日志中间件：输出结构化访问日志，并为每个请求确保存在 trace_id，
+// 供下游中间件/处理器复用（写入 gin.Context 的 "trace_id" 和响应头
+// X-Request-ID）。
 func Logger() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
 		path := c.Request.URL.Path
 		query := c.Request.URL.RawQuery
 
-		c.Next()
+		// Establish a trace ID as early as possible so every log line and the
+		// persisted UsageRecord can be correlated.
+		traceID := c.GetHeader("X-Request-ID")
+		if traceID == "" {
+			traceID = generateRequestID()
+		}
+		c.Set("trace_id", traceID)
+		c.Writer.Header().Set("X-Request-ID", traceID)
 
-		timestamp := time.Now()
-		latency := timestamp.Sub(start)
-		clientIP := c.ClientIP()
-		method := c.Request.Method
-		statusCode := c.Writer.Status()
-		errorMessage := c.Errors.ByType(gin.ErrorTypePrivate).String()
+		c.Next()
 
 		if query != "" {
 			path = path + "?" + query
 		}
+		status := c.Writer.Status()
 
-		log.Printf("[GATEWAY] %v | %3d | %13v | %15s | %-7s %s",
-			timestamp.Format("2006/01/02 - 15:04:05"),
-			statusCode,
-			latency,
-			clientIP,
-			method,
-			path,
-		)
-
-		if errorMessage != "" {
-			log.Printf("[GATEWAY] Error: %s", errorMessage)
+		attrs := []slog.Attr{
+			slog.String("trace_id", traceID),
+			slog.Int("status", status),
+			slog.String("method", c.Request.Method),
+			slog.String("path", path),
+			slog.String("client_ip", c.ClientIP()),
+			slog.Duration("latency", time.Since(start)),
 		}
+		if errMsg := c.Errors.ByType(gin.ErrorTypePrivate).String(); errMsg != "" {
+			attrs = append(attrs, slog.String("error", errMsg))
+		}
+
+		lvl := slog.LevelInfo
+		if status >= 500 {
+			lvl = slog.LevelError
+		} else if status >= 400 {
+			lvl = slog.LevelWarn
+		}
+		slog.LogAttrs(c.Request.Context(), lvl, "request", attrs...)
 	}
 }
 
@@ -49,7 +61,12 @@ func Recovery() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		defer func() {
 			if err := recover(); err != nil {
-				log.Printf("[GATEWAY] Panic recovered: %v", err)
+				traceID, _ := c.Get("trace_id")
+				slog.Error("panic recovered",
+					slog.Any("panic", err),
+					slog.Any("trace_id", traceID),
+					slog.String("path", c.Request.URL.Path),
+				)
 
 				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
 					"error":  "Internal server error",

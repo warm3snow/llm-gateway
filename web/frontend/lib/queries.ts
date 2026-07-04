@@ -1,0 +1,99 @@
+// React Query hooks for the LLM Gateway API.
+// Centralizing these keeps query keys consistent and cacheable across pages.
+"use client";
+
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { api } from "./api";
+import type {
+  DashboardStats,
+  AnalyticsData,
+  Provider,
+  ProvidersResponse,
+  VirtualKey,
+  VirtualKeysResponse,
+  UsageRecord,
+  UsageResponse,
+  ServerConfig,
+} from "./types";
+
+export const queryKeys = {
+  stats: ["stats"] as const,
+  analytics: ["analytics"] as const,
+  providers: ["providers"] as const,
+  virtualKeys: ["virtualKeys"] as const,
+  usage: ["usage"] as const,
+  config: ["config"] as const,
+};
+
+export function useStats() {
+  return useQuery<DashboardStats>({
+    queryKey: queryKeys.stats,
+    queryFn: api.getStats,
+  });
+}
+
+export function useAnalytics() {
+  return useQuery<AnalyticsData>({
+    queryKey: queryKeys.analytics,
+    queryFn: api.getAnalytics,
+  });
+}
+
+export function useProviders() {
+  return useQuery<Provider[]>({
+    queryKey: queryKeys.providers,
+    queryFn: async () => (await api.getProviders()).data,
+  });
+}
+
+export function useVirtualKeys() {
+  return useQuery<VirtualKey[]>({
+    queryKey: queryKeys.virtualKeys,
+    queryFn: async () => (await api.getVirtualKeys()).virtual_keys,
+  });
+}
+
+export function useCreateVirtualKey() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.createVirtualKey,
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.virtualKeys }),
+  });
+}
+
+export function useDeleteVirtualKey() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.deleteVirtualKey(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.virtualKeys }),
+  });
+}
+
+export function useUsage() {
+  return useQuery<UsageRecord[]>({
+    queryKey: queryKeys.usage,
+    queryFn: async () => (await api.getUsage()).records,
+  });
+}
+
+export function useConfig() {
+  return useQuery<ServerConfig>({
+    queryKey: queryKeys.config,
+    queryFn: async () => (await api.getConfig()).data,
+  });
+}
+
+export function useUpdateConfig() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: ServerConfig) => api.updateConfig(data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.config }),
+  });
+}
+
+// Re-export response types if needed elsewhere
+export type {
+  ProvidersResponse,
+  VirtualKeysResponse,
+  UsageResponse,
+};

@@ -138,9 +138,14 @@ func TestGetProviders(t *testing.T) {
 		},
 		Gateway: config.GatewayConfig{
 			DefaultProvider: "openai",
+			// GetProviders builds its list from the SupportedProviders
+			// whitelist and marks each as configured/enabled based on the
+			// Providers map, so the test config must set both.
+			SupportedProviders: []string{"openai"},
 			Providers: map[string]types.Options{
 				"openai": {
-					APIKey:    "sk-test",
+					Provider:   "openai",
+					APIKey:     "sk-test",
 					CustomHost: "https://api.openai.com/v1",
 				},
 			},

@@ -1,0 +1,1102 @@
+definitions:
+  config.Config:
+    type: object
+  handler.LoginRequest:
+    properties:
+      password:
+        type: string
+      username:
+        type: string
+    required:
+    - password
+    - username
+    type: object
+  models.VirtualKeyRequest:
+    properties:
+      budget_total:
+        type: number
+      metadata:
+        type: string
+      name:
+        type: string
+      providers:
+        items:
+          type: string
+        type: array
+      rate_limit:
+        type: integer
+      rate_limit_window:
+        type: integer
+    required:
+    - name
+    type: object
+  types.ChatCompletionRequest:
+    type: object
+  types.ChatCompletionResponse:
+    properties:
+      choices:
+        items:
+          $ref: '#/definitions/types.Choice'
+        type: array
+      created:
+        type: integer
+      id:
+        type: string
+      model:
+        type: string
+      object:
+        type: string
+      usage:
+        $ref: '#/definitions/types.Usage'
+    type: object
+  types.Choice:
+    properties:
+      finish_reason:
+        type: string
+      index:
+        type: integer
+      message:
+        $ref: '#/definitions/types.Message'
+    type: object
+  types.EmbeddingRequest:
+    properties:
+      input: {}
+      model:
+        example: text-embedding-ada-002
+        type: string
+      user:
+        example: user-123
+        type: string
+    required:
+    - input
+    - model
+    type: object
+  types.ErrorResponse:
+    properties:
+      code:
+        type: string
+      message:
+        type: string
+      param:
+        type: string
+      type:
+        type: string
+    type: object
+  types.Message:
+    type: object
+  types.Usage:
+    properties:
+      completion_tokens:
+        type: integer
+      prompt_tokens:
+        type: integer
+      total_tokens:
+        type: integer
+    type: object
+host: localhost:8080
+info:
+  contact:
+    email: support@swagger.io
+    name: API Support
+    url: http://www.swagger.io/support
+  description: Unified API gateway for multiple LLM providers with virtual key management,
+    response caching, and admin dashboard.
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+  termsOfService: http://swagger.io/terms/
+  title: LLM Gateway API
+  version: "1.0"
+paths:
+  /api/v1/admin/config:
+    get:
+      consumes:
+      - application/json
+      description: Get current gateway configuration
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Configuration data
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get configuration
+      tags:
+      - admin
+    post:
+      consumes:
+      - application/json
+      description: Update gateway configuration
+      parameters:
+      - description: Configuration data
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/config.Config'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Configuration updated
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid request
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "500":
+          description: Internal error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Update configuration
+      tags:
+      - admin
+  /api/v1/admin/health:
+    get:
+      consumes:
+      - application/json
+      description: Check gateway health status
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Health status
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Health check
+      tags:
+      - admin
+  /api/v1/admin/providers:
+    get:
+      consumes:
+      - application/json
+      description: Get all supported providers (whitelist) with their configuration
+        if configured
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of providers
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get providers
+      tags:
+      - admin
+    post:
+      consumes:
+      - application/json
+      description: Add a new provider configuration
+      parameters:
+      - description: Provider configuration
+        in: body
+        name: request
+        required: true
+        schema:
+          additionalProperties: true
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Provider added
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid request
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "409":
+          description: Provider already exists
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Add provider
+      tags:
+      - admin
+  /api/v1/admin/providers/{name}:
+    delete:
+      consumes:
+      - application/json
+      description: Remove a provider configuration
+      parameters:
+      - description: Provider name
+        in: path
+        name: name
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Provider removed
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "404":
+          description: Provider not found
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Remove provider
+      tags:
+      - admin
+  /api/v1/admin/stats:
+    get:
+      consumes:
+      - application/json
+      description: Get gateway statistics
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Stats data
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get stats
+      tags:
+      - admin
+  /api/v1/auth/login:
+    post:
+      consumes:
+      - application/json
+      description: Authenticate user and return JWT token
+      parameters:
+      - description: Login credentials
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handler.LoginRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Returns JWT token
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "401":
+          description: Invalid credentials
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+      summary: User login
+      tags:
+      - auth
+  /api/v1/stats/overview:
+    get:
+      consumes:
+      - application/json
+      description: Get dashboard overview statistics
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Stats overview
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get stats overview
+      tags:
+      - stats
+  /api/v1/usage:
+    get:
+      consumes:
+      - application/json
+      description: Get paginated model-invocation usage records with filters
+      parameters:
+      - description: Filter by provider
+        in: query
+        name: provider
+        type: string
+      - description: Filter by model
+        in: query
+        name: model
+        type: string
+      - description: Filter by status code
+        in: query
+        name: status_code
+        type: integer
+      - description: Filter by start date (YYYY-MM-DD)
+        in: query
+        name: start_date
+        type: string
+      - description: Filter by end date (YYYY-MM-DD)
+        in: query
+        name: end_date
+        type: string
+      - description: Limit results
+        in: query
+        name: limit
+        type: integer
+      - description: Offset for pagination
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of usage records
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get usage records
+      tags:
+      - usage
+  /api/v1/usage/{id}:
+    get:
+      consumes:
+      - application/json
+      description: Get a single usage record by ID
+      parameters:
+      - description: Record ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Record details
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid ID
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "404":
+          description: Not found
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get usage record
+      tags:
+      - usage
+  /api/v1/virtual-keys:
+    get:
+      consumes:
+      - application/json
+      description: Get all virtual keys
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of virtual keys
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: List virtual keys
+      tags:
+      - virtual-keys
+    post:
+      consumes:
+      - application/json
+      description: Create a new virtual key for API access
+      parameters:
+      - description: Virtual key request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/models.VirtualKeyRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Virtual key created
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Create virtual key
+      tags:
+      - virtual-keys
+  /api/v1/virtual-keys/{id}:
+    delete:
+      consumes:
+      - application/json
+      description: Delete a virtual key by ID
+      parameters:
+      - description: Virtual Key ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Virtual key deleted
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid ID
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "404":
+          description: Not found
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Delete virtual key
+      tags:
+      - virtual-keys
+    get:
+      consumes:
+      - application/json
+      description: Get a virtual key by ID
+      parameters:
+      - description: Virtual Key ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Virtual key details
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid ID
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "404":
+          description: Not found
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Get virtual key
+      tags:
+      - virtual-keys
+    put:
+      consumes:
+      - application/json
+      description: Update a virtual key by ID
+      parameters:
+      - description: Virtual Key ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      - description: Virtual key request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/models.VirtualKeyRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Virtual key updated
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "404":
+          description: Not found
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Update virtual key
+      tags:
+      - virtual-keys
+  /api/v1/virtual-keys/{id}/reset:
+    post:
+      consumes:
+      - application/json
+      description: Reset budget usage for a virtual key
+      parameters:
+      - description: Virtual Key ID
+        in: path
+        name: id
+        required: true
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Virtual key reset
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid ID
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "404":
+          description: Not found
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+      security:
+      - BearerAuth: []
+      summary: Reset virtual key budget
+      tags:
+      - virtual-keys
+  /v1/audio/speech:
+    post:
+      consumes:
+      - application/json
+      description: Convert text to speech
+      parameters:
+      - description: TTS request
+        in: body
+        name: request
+        required: true
+        schema:
+          additionalProperties: true
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Audio response
+          schema:
+            type: object
+        "400":
+          description: Invalid request
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - VirtualKeyAuth: []
+      summary: Text to speech
+      tags:
+      - proxy
+  /v1/audio/transcriptions:
+    post:
+      consumes:
+      - multipart/form-data
+      description: Transcribe audio to text (Whisper)
+      parameters:
+      - description: Audio file
+        in: formData
+        name: file
+        required: true
+        type: file
+      - description: Model name
+        in: formData
+        name: model
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Transcription response
+          schema:
+            type: object
+        "400":
+          description: Invalid request
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - VirtualKeyAuth: []
+      summary: Audio transcription
+      tags:
+      - proxy
+  /v1/audio/translations:
+    post:
+      consumes:
+      - multipart/form-data
+      description: Translate audio to English (Whisper)
+      parameters:
+      - description: Audio file
+        in: formData
+        name: file
+        required: true
+        type: file
+      - description: Model name
+        in: formData
+        name: model
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Translation response
+          schema:
+            type: object
+        "400":
+          description: Invalid request
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - VirtualKeyAuth: []
+      summary: Audio translation
+      tags:
+      - proxy
+  /v1/chat/completions:
+    post:
+      consumes:
+      - application/json
+      description: Create a chat completion (OpenAI-compatible)
+      parameters:
+      - description: Chat completion request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/types.ChatCompletionRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Chat completion response
+          schema:
+            $ref: '#/definitions/types.ChatCompletionResponse'
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+      security:
+      - VirtualKeyAuth: []
+      summary: Chat completion
+      tags:
+      - proxy
+  /v1/chat/completions/stream:
+    post:
+      consumes:
+      - application/json
+      description: Create a streaming chat completion (SSE)
+      parameters:
+      - description: Chat completion request
+        in: body
+        name: request
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Streaming response
+          schema:
+            type: object
+        "400":
+          description: Invalid request
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - VirtualKeyAuth: []
+      summary: Stream chat completion
+      tags:
+      - proxy
+  /v1/completions:
+    post:
+      consumes:
+      - application/json
+      description: Create a text completion (legacy)
+      parameters:
+      - description: Completion request
+        in: body
+        name: request
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Completion response
+          schema:
+            type: object
+        "400":
+          description: Invalid request
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - VirtualKeyAuth: []
+      summary: Text completion
+      tags:
+      - proxy
+  /v1/embeddings:
+    post:
+      consumes:
+      - application/json
+      description: Create embeddings for text
+      parameters:
+      - description: Embedding request
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/types.EmbeddingRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Embedding response
+          schema:
+            type: object
+        "400":
+          description: Invalid request
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "401":
+          description: Unauthorized
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+        "500":
+          description: Internal error
+          schema:
+            $ref: '#/definitions/types.ErrorResponse'
+      security:
+      - VirtualKeyAuth: []
+      summary: Create embeddings
+      tags:
+      - proxy
+  /v1/images/generations:
+    post:
+      consumes:
+      - application/json
+      description: Generate images from text (DALL-E)
+      parameters:
+      - description: Image generation request
+        in: body
+        name: request
+        required: true
+        schema:
+          additionalProperties: true
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Image generation response
+          schema:
+            type: object
+        "400":
+          description: Invalid request
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - VirtualKeyAuth: []
+      summary: Generate images
+      tags:
+      - proxy
+  /v1/models:
+    get:
+      consumes:
+      - application/json
+      description: List available models
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Models list" example({"object":"list","data":[{{"id":"gpt-3.5-turbo","object":"model","created":1234567890,"owned_by":"openai","permission":[],"root":"gpt-3.5-turbo","parent":null}},{{"id":"gpt-4","object":"model","created":1234567890,"owned_by":"openai","permission":[],"root":"gpt-4","parent":null}}]})
+          schema:
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - VirtualKeyAuth: []
+      summary: List models
+      tags:
+      - proxy
+  /v1/proxy/{path}:
+    post:
+      consumes:
+      - application/json
+      description: Proxy any request to upstream provider
+      parameters:
+      - description: Upstream path
+        in: path
+        name: path
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Proxy response
+          schema:
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - VirtualKeyAuth: []
+      summary: Proxy request
+      tags:
+      - proxy
+schemes:
+- http
+- https
+securityDefinitions:
+  BearerAuth:
+    description: Type "Bearer" followed by a space and JWT token.
+    in: header
+    name: Authorization
+    type: apiKey
+  VirtualKeyAuth:
+    description: Virtual key for API access
+    in: header
+    name: x-llm-gateway-api-key
+    type: apiKey
+swagger: "2.0"

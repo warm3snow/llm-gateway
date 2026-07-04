@@ -1,0 +1,308 @@
+@import "tailwindcss";
+
+/*
+ * LLM Gateway — Terminal / Control-Room theme
+ * A dark operator-console canvas with phosphor amber + cyan accents.
+ * Designed to feel like an LLM control plane, not a generic SaaS dashboard.
+ */
+
+@layer base {
+  :root {
+    /* Base canvas — deep near-black with a faint blue undertone */
+    --background: 222 30% 4%;
+    --background-elevated: 222 28% 7%;
+    --foreground: 40 30% 88%;
+
+    /* Surfaces — panels, cards, the "rack mounted" feel */
+    --card: 222 26% 7%;
+    --card-foreground: 40 30% 90%;
+    --popover: 222 30% 6%;
+    --popover-foreground: 40 30% 90%;
+
+    /* Primary — phosphor amber, the operator's signal color */
+    --primary: 38 92% 56%;
+    --primary-foreground: 222 40% 6%;
+    --primary-dim: 38 60% 38%;
+
+    /* Secondary — dim neutral panel */
+    --secondary: 222 20% 12%;
+    --secondary-foreground: 40 20% 82%;
+
+    /* Accent — CRT cyan, the data/live signal color */
+    --accent: 178 78% 48%;
+    --accent-foreground: 222 50% 5%;
+    --accent-dim: 178 60% 36%;
+
+    /* Muted — recessed text, secondary metadata */
+    --muted: 222 18% 14%;
+    --muted-foreground: 40 8% 52%;
+
+    /* Status signals — kept dim, never decorative */
+    --destructive: 0 72% 55%;
+    --destructive-foreground: 40 30% 95%;
+    --success: 142 60% 48%;
+    --warning: 38 88% 56%;
+    --info: 178 70% 46%;
+
+    /* Lines and rings — hairline borders, like etched metal panels */
+    --border: 222 22% 14%;
+    --border-bright: 222 30% 22%;
+    --input: 222 22% 14%;
+    --ring: 38 92% 56%;
+
+    /* Radius — small, mechanical */
+    --radius: 0.375rem;
+
+    /* Terminal-specific tokens */
+    --grid-line: 222 25% 12%;
+    --scanline: 178 80% 48%;
+    --glow-amber: 38 92% 56%;
+    --glow-cyan: 178 78% 48%;
+  }
+
+  .dark {
+    /* The control-room is dark by default; .dark is a no-op alias
+       so next-themes has something to toggle against. */
+    --background: 222 30% 4%;
+    --foreground: 40 30% 88%;
+  }
+
+  .light {
+    /* Light variant — a "day mode" control room: paper-white with the
+       same amber/cyan accents. Distinct from generic SaaS white. */
+    --background: 40 30% 96%;
+    --background-elevated: 40 32% 98%;
+    --foreground: 222 30% 12%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222 30% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 30% 12%;
+
+    --primary: 28 90% 48%;
+    --primary-foreground: 40 30% 98%;
+    --primary-dim: 28 60% 38%;
+
+    --secondary: 40 20% 92%;
+    --secondary-foreground: 222 20% 22%;
+
+    --accent: 185 72% 38%;
+    --accent-foreground: 40 30% 98%;
+    --accent-dim: 185 55% 30%;
+
+    --muted: 40 16% 90%;
+    --muted-foreground: 222 12% 42%;
+
+    --destructive: 0 70% 48%;
+    --destructive-foreground: 40 30% 98%;
+    --success: 142 55% 38%;
+    --warning: 32 85% 48%;
+    --info: 185 65% 38%;
+
+    --border: 40 14% 86%;
+    --border-bright: 40 18% 72%;
+    --input: 40 14% 86%;
+    --ring: 28 90% 48%;
+
+    --grid-line: 40 18% 88%;
+    --scanline: 185 70% 40%;
+    --glow-amber: 28 90% 48%;
+    --glow-cyan: 185 72% 38%;
+  }
+}
+
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-background-elevated: hsl(var(--background-elevated));
+  --color-foreground: hsl(var(--foreground));
+
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-primary-dim: hsl(var(--primary-dim));
+
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-accent-dim: hsl(var(--accent-dim));
+
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-success: hsl(var(--success));
+  --color-warning: hsl(var(--warning));
+  --color-info: hsl(var(--info));
+
+  --color-border: hsl(var(--border));
+  --color-border-bright: hsl(var(--border-bright));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+
+  --color-grid-line: hsl(var(--grid-line));
+
+  --radius: var(--radius);
+
+  /* Fonts — system stacks that achieve the terminal aesthetic without
+     requiring external font fetches at build time.
+       --font-mono: native terminal monospace (Menlo on macOS, Consolas on Windows)
+       --font-sans: clean system sans
+       --font-display: same as mono — headlines read like a terminal readout */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", "Menlo", "Consolas", monospace;
+  --font-display: var(--font-mono);
+}
+
+@layer base {
+  * {
+    border-color: hsl(var(--border));
+  }
+
+  html {
+    font-feature-settings: "cv11", "ss03";
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+    /* Faint CRT scanline + grid texture, very low opacity.
+       This is the only "decorative" background effect — kept subtle. */
+    background-image:
+      linear-gradient(to bottom, hsl(var(--scanline) / 0.018) 0px,
+        hsl(var(--scanline) / 0.018) 1px, transparent 1px, transparent 3px),
+      linear-gradient(to right, hsl(var(--grid-line) / 0.35) 1px, transparent 1px);
+    background-size: 100% 3px, 48px 48px;
+    background-position: 0 0, 0 0;
+  }
+
+  /* Monospace is the default for numerics — see .num utility below */
+  ::selection {
+    background-color: hsl(var(--primary) / 0.25);
+    color: hsl(var(--foreground));
+  }
+
+  /* Scrollbars — thin, mechanical, themed */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: hsl(var(--background)); }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--border-bright));
+    border-radius: 0;
+  }
+  ::-webkit-scrollbar-thumb:hover { background: hsl(var(--primary-dim)); }
+}
+
+@layer utilities {
+  /* Numerics — tabular, monospace, like a real terminal readout */
+  .num {
+    font-family: var(--font-mono), ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+
+  /* Display headlines — used for section titles and big stats */
+  .font-display {
+    font-family: var(--font-display), var(--font-sans), sans-serif;
+  }
+
+  /* Phosphor glow — applied sparingly to "live" indicators */
+  .glow-amber {
+    text-shadow: 0 0 8px hsl(var(--glow-amber) / 0.6),
+                 0 0 2px hsl(var(--glow-amber) / 0.9);
+  }
+  .glow-cyan {
+    text-shadow: 0 0 8px hsl(var(--glow-cyan) / 0.5),
+                 0 0 2px hsl(var(--glow-cyan) / 0.85);
+  }
+  .box-glow-amber {
+    box-shadow: 0 0 0 1px hsl(var(--glow-amber) / 0.4),
+                0 0 16px -4px hsl(var(--glow-amber) / 0.35);
+  }
+  .box-glow-cyan {
+    box-shadow: 0 0 0 1px hsl(var(--glow-cyan) / 0.35),
+                0 0 16px -4px hsl(var(--glow-cyan) / 0.3);
+  }
+
+  /* Hairline panel — used for the recessed "rack unit" cards */
+  .panel {
+    background-color: hsl(var(--card));
+    border: 1px solid hsl(var(--border));
+    box-shadow: inset 0 1px 0 hsl(var(--border-bright) / 0.3);
+  }
+
+  /* Status dot — the little LED next to a provider/health indicator */
+  .led {
+    width: 6px;
+    height: 6px;
+    border-radius: 9999px;
+    box-shadow: 0 0 6px currentColor;
+  }
+
+  /* Blink — for the cursor and live status dots */
+  @keyframes blink {
+    0%, 49% { opacity: 1; }
+    50%, 100% { opacity: 0.15; }
+  }
+  .blink { animation: blink 1.2s steps(1) infinite; }
+
+  /* Scan-in — for page load reveals, like a CRT warming up */
+  @keyframes scan-in {
+    0% { opacity: 0; transform: translateY(4px); filter: blur(2px); }
+    60% { opacity: 1; filter: blur(0); }
+    100% { opacity: 1; transform: translateY(0); filter: blur(0); }
+  }
+  .scan-in { animation: scan-in 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+
+  /* Sweep — a single horizontal sweep across a loading bar */
+  @keyframes sweep {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+  }
+  .sweep::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      hsl(var(--glow-cyan) / 0.5),
+      transparent
+    );
+    animation: sweep 1.4s ease-in-out infinite;
+  }
+
+  /* Pulse-dot — for "live" status dots */
+  @keyframes pulse-dot {
+    0%, 100% { opacity: 1; box-shadow: 0 0 6px currentColor; }
+    50% { opacity: 0.5; box-shadow: 0 0 12px currentColor; }
+  }
+  .pulse-dot { animation: pulse-dot 1.8s ease-in-out infinite; }
+}
+
+/* Recharts — theme the chart elements to match */
+.recharts-cartesian-grid line {
+  stroke: hsl(var(--grid-line) / 0.5);
+}
+.recharts-cartesian-axis-tick-value {
+  fill: hsl(var(--muted-foreground));
+  font-family: var(--font-mono), monospace;
+  font-size: 11px;
+}
+.recharts-tooltip-wrapper .recharts-default-tooltip {
+  background-color: hsl(var(--popover)) !important;
+  border: 1px solid hsl(var(--border-bright)) !important;
+  border-radius: var(--radius) !important;
+  font-family: var(--font-mono), monospace !important;
+}
+.recharts-tooltip-wrapper .recharts-tooltip-label {
+  color: hsl(var(--primary)) !important;
+}

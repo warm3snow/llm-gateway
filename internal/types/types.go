@@ -18,6 +18,8 @@ const (
 	ProviderOllama      Provider = "ollama"
 	ProviderGroq        Provider = "groq"
 	ProviderDeepSeek    Provider = "deepseek"
+	ProviderGLM         Provider = "glm"
+	ProviderKimi        Provider = "kimi"
 	ProviderBedrock     Provider = "bedrock"
 	ProviderReplicate   Provider = "replicate"
 	ProviderHuggingFace Provider = "huggingface"
@@ -116,27 +118,33 @@ type GuardrailConfig struct {
 
 // Message 聊天消息
 type Message struct {
-	Role    string      `json:"role" binding:"required"`
-	Content interface{} `json:"content" binding:"required"`
-	Name    string      `json:"name,omitempty"`
+	Role    string      `json:"role" binding:"required" example:"user"`
+	Content interface{} `json:"content" binding:"required" example:"Hello, how are you?"`
+	Name    string      `json:"name,omitempty" example:"John"`
 }
 
 // ChatCompletionRequest 聊天补全请求
 type ChatCompletionRequest struct {
-	Model            string                 `json:"model" binding:"required"`
-	Messages         []Message              `json:"messages" binding:"required"`
-	Temperature      float64                `json:"temperature,omitempty"`
-	TopP             float64                `json:"top_p,omitempty"`
-	N                int                    `json:"n,omitempty"`
-	Stream           bool                   `json:"stream,omitempty"`
-	Stop             []string               `json:"stop,omitempty"`
-	MaxTokens        int                    `json:"max_tokens,omitempty"`
-	PresencePenalty  float64                `json:"presence_penalty,omitempty"`
+	Model            string                 `json:"model" binding:"required" example:"gpt-3.5-turbo"`
+	Messages         []Message              `json:"messages" binding:"required" example:"[{\"role\":\"user\",\"content\":\"Hello\"}]"`
+	Temperature      float64                `json:"temperature,omitempty" example:"0.7"`
+	TopP             float64                `json:"top_p,omitempty" example:"1.0"`
+	N                int                    `json:"n,omitempty" example:"1"`
+	Stream           bool                   `json:"stream,omitempty" example:"false"`
+	Stop             []string               `json:"stop,omitempty" example:"\\n"`
+	MaxTokens        int                    `json:"max_tokens,omitempty" example:"100"`
+	PresencePenalty  float64                `json:"presence_penalty,omitempty" example:"0"`
 	FrequencyPenalty float64                `json:"frequency_penalty,omitempty"`
 	User             string                 `json:"user,omitempty"`
 	Tools            []interface{}          `json:"tools,omitempty"`
 	ToolChoice       interface{}            `json:"tool_choice,omitempty"`
 	ResponseFormat   map[string]interface{} `json:"response_format,omitempty"`
+	StreamOptions    *StreamOptions         `json:"stream_options,omitempty"`
+}
+
+// StreamOptions controls streaming response behavior (OpenAI-compatible).
+type StreamOptions struct {
+	IncludeUsage bool `json:"include_usage,omitempty"`
 }
 
 // CompletionRequest 补全请求
@@ -156,9 +164,9 @@ type CompletionRequest struct {
 
 // EmbeddingRequest 嵌入请求
 type EmbeddingRequest struct {
-	Model string      `json:"model" binding:"required"`
+	Model string      `json:"model" binding:"required" example:"text-embedding-ada-002"`
 	Input interface{} `json:"input" binding:"required"`
-	User  string      `json:"user,omitempty"`
+	User  string      `json:"user,omitempty" example:"user-123"`
 }
 
 // ResponseFormat 响应格式

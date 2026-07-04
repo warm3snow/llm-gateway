@@ -118,3 +118,17 @@ func RegisterGlobalProvider(name string, factory func(opts *types.Options) (Prov
 func CreateProvider(name string, opts *types.Options) (Provider, error) {
 	return globalFactory.Create(name, opts)
 }
+
+// ListProviders 列出所有已注册的提供商名称
+func (f *ProviderFactory) ListProviders() []string {
+	names := make([]string, 0, len(f.providers))
+	for name := range f.providers {
+		names = append(names, name)
+	}
+	return names
+}
+
+// GetGlobalFactory 获取全局提供商工厂
+func GetGlobalFactory() *ProviderFactory {
+	return globalFactory
+}

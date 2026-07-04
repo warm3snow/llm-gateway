@@ -21,11 +21,16 @@ func NewHandler(cfg *config.Config) *Handler {
 	return &Handler{Config: cfg}
 }
 
-// RegisterRoutes 注册路由
+// RegisterRoutes 注册路由（无JWT保护，用于向后兼容）
 func (h *Handler) RegisterRoutes(router *gin.Engine) {
+	h.RegisterRoutesWithAuth(router, nil)
+}
+
+// RegisterRoutesWithAuth 注册路由（可传入JWT中间件）
+func (h *Handler) RegisterRoutesWithAuth(router *gin.Engine, jwtMiddleware gin.HandlerFunc) {
 	// 静态文件
 	router.Static("/static", "./web/static")
-	
+
 	// 加载模板（如果不存在则忽略）
 	templates := "web/templates/*"
 	if _, err := os.Stat("web/templates"); err == nil {
@@ -40,6 +45,9 @@ func (h *Handler) RegisterRoutes(router *gin.Engine) {
 
 	// API 路由
 	api := router.Group("/api/v1/admin")
+	if jwtMiddleware != nil {
+		api.Use(jwtMiddleware)
+	}
 	{
 		// 配置管理
 		api.GET("/config", h.GetConfig)
@@ -87,14 +95,38 @@ func (h *Handler) ConfigPage(c *gin.Context) {
 }
 
 // GetConfig 获取配置
+// GET /api/v1/admin/config
+// @Summary Get configuration
+// @Description Get current gateway configuration
+// @Tags admin
+// @Accept json
+// @Produce json
+// @Success 200 {object} map[string]interface{} "Configuration data"
+// @Failure 401 {object} types.ErrorResponse "Unauthorized"
+// @Failure 500 {object} types.ErrorResponse "Internal error"
+// @Security BearerAuth
+// @Router /api/v1/admin/config [get]
 func (h *Handler) GetConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
-		"config": h.Config,
+		"data":   h.Config,
 		"status": "success",
 	})
 }
 
 // UpdateConfig 更新配置
+// POST /api/v1/admin/config
+// @Summary Update configuration
+// @Description Update gateway configuration
+// @Tags admin
+// @Accept json
+// @Produce json
+// @Param request body config.Config true "Configuration data"
+// @Success 200 {object} map[string]interface{} "Configuration updated"
+// @Failure 400 {object} map[string]interface{} "Invalid request"
+// @Failure 401 {object} types.ErrorResponse "Unauthorized"
+// @Failure 500 {object} map[string]interface{} "Internal error"
+// @Security BearerAuth
+// @Router /api/v1/admin/config [post]
 func (h *Handler) UpdateConfig(c *gin.Context) {
 	var newConfig config.Config
 
@@ -131,33 +163,83 @@ func (h *Handler) UpdateConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Config updated successfully",
 		"status":  "success",
-		"config":  newConfig,
+		"data":    newConfig,
 	})
 }
 
-// GetProviders 获取所有 Provider
-func (h *Handler) GetProviders(c *gin.Context) {
-	providers := []gin.H{}
+// ProviderResponse is the response for a single provider
+type ProviderResponse struct {
+	Name           string `json:"name"`
+	Provider       string `json:"provider"`
+	APIKey         string `json:"apiKey"`
+	CustomHost     string `json:"customHost,omitempty"`
+	Weight         int    `json:"weight"`
+	Enabled        bool   `json:"enabled"`
+	RequestTimeout int    `json:"requestTimeout"`
+}
 
-	for name, opts := range h.Config.Gateway.Providers {
-		providers = append(providers, gin.H{
-			"name":           name,
-			"provider":       opts.Provider,
-			"apiKey":         maskAPIKey(opts.APIKey),
-			"customHost":     opts.CustomHost,
-			"weight":         opts.Weight,
-			"enabled":        true,
-			"requestTimeout": opts.RequestTimeout,
+// GetProviders 获取所有 Provider
+// GET /api/v1/admin/providers
+// @Summary Get providers
+// @Description Get all supported providers (whitelist) with their configuration if configured
+// @Tags admin
+// @Accept json
+// @Produce json
+// @Success 200 {object} map[string]interface{} "List of providers"
+// @Failure 401 {object} types.ErrorResponse "Unauthorized"
+// @Failure 500 {object} types.ErrorResponse "Internal error"
+// @Security BearerAuth
+// @Router /api/v1/admin/providers [get]
+func (h *Handler) GetProviders(c *gin.Context) {
+	providers := []ProviderResponse{}
+
+	// Build the list from the supportedProviders whitelist
+	for _, name := range h.Config.Gateway.SupportedProviders {
+		opts, configured := h.Config.Gateway.Providers[name]
+		providerName := name
+		apiKey := ""
+		customHost := ""
+		weight := 0
+		requestTimeout := 0
+		enabled := configured
+		if configured {
+			providerName = opts.Provider
+			apiKey = maskAPIKey(opts.APIKey)
+			customHost = opts.CustomHost
+			weight = opts.Weight
+			requestTimeout = opts.RequestTimeout
+		}
+		providers = append(providers, ProviderResponse{
+			Name:           name,
+			Provider:       providerName,
+			APIKey:         apiKey,
+			CustomHost:     customHost,
+			Weight:         weight,
+			Enabled:        enabled,
+			RequestTimeout: requestTimeout,
 		})
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"providers": providers,
-		"status":    "success",
+		"data":   providers,
+		"status": "success",
 	})
 }
 
 // AddProvider 添加 Provider
+// @Summary Add provider
+// @Description Add a new provider configuration
+// @Tags admin
+// @Accept json
+// @Produce json
+// @Param request body map[string]interface{} true "Provider configuration"
+// @Success 200 {object} map[string]interface{} "Provider added"
+// @Failure 400 {object} map[string]interface{} "Invalid request"
+// @Failure 401 {object} types.ErrorResponse "Unauthorized"
+// @Failure 409 {object} map[string]interface{} "Provider already exists"
+// @Failure 500 {object} map[string]interface{} "Internal error"
+// @Security BearerAuth
+// @Router /api/v1/admin/providers [post]
 func (h *Handler) AddProvider(c *gin.Context) {
 	var req struct {
 		Name           string                 `json:"name" binding:"required"`
@@ -232,6 +314,18 @@ func (h *Handler) AddProvider(c *gin.Context) {
 }
 
 // RemoveProvider 删除 Provider
+// @Summary Remove provider
+// @Description Remove a provider configuration
+// @Tags admin
+// @Accept json
+// @Produce json
+// @Param name path string true "Provider name"
+// @Success 200 {object} map[string]interface{} "Provider removed"
+// @Failure 401 {object} types.ErrorResponse "Unauthorized"
+// @Failure 404 {object} map[string]interface{} "Provider not found"
+// @Failure 500 {object} map[string]interface{} "Internal error"
+// @Security BearerAuth
+// @Router /api/v1/admin/providers/{name} [delete]
 func (h *Handler) RemoveProvider(c *gin.Context) {
 	name := c.Param("name")
 
@@ -263,6 +357,16 @@ func (h *Handler) RemoveProvider(c *gin.Context) {
 }
 
 // GetStats 获取统计信息
+// @Summary Get stats
+// @Description Get gateway statistics
+// @Tags admin
+// @Accept json
+// @Produce json
+// @Success 200 {object} map[string]interface{} "Stats data"
+// @Failure 401 {object} types.ErrorResponse "Unauthorized"
+// @Failure 500 {object} types.ErrorResponse "Internal error"
+// @Security BearerAuth
+// @Router /api/v1/admin/stats [get]
 func (h *Handler) GetStats(c *gin.Context) {
 	// TODO: 实现真实的统计信息
 	stats := gin.H{
@@ -281,6 +385,15 @@ func (h *Handler) GetStats(c *gin.Context) {
 }
 
 // HealthCheck 健康检查
+// @Summary Health check
+// @Description Check gateway health status
+// @Tags admin
+// @Accept json
+// @Produce json
+// @Success 200 {object} map[string]interface{} "Health status"
+// @Failure 401 {object} types.ErrorResponse "Unauthorized"
+// @Security BearerAuth
+// @Router /api/v1/admin/health [get]
 func (h *Handler) HealthCheck(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "healthy",

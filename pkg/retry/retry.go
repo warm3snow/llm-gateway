@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/warm3snow/llm-gateway/internal/metrics"
 	"github.com/warm3snow/llm-gateway/internal/types"
 )
 
@@ -50,13 +51,25 @@ func NewRetryer(config *RetryConfig) *Retryer {
 	return &Retryer{Config: config}
 }
 
-// Do 执行带重试的请求
+// Do 执行带重试的请求。
 func (r *Retryer) Do(ctx context.Context, fn func() (*http.Response, error)) (*http.Response, error) {
+	return r.DoWithProvider(ctx, "", fn)
+}
+
+// DoWithProvider 执行带重试的请求，并以 provider 维度记录重试指标
+// （retries_total{provider,reason} 与 retry_result_total{provider,result}）。
+// provider 为空时以 "unknown" 记录。
+func (r *Retryer) DoWithProvider(ctx context.Context, provider string, fn func() (*http.Response, error)) (*http.Response, error) {
+	if provider == "" {
+		provider = "unknown"
+	}
+
 	var resp *http.Response
 	var err error
 
 	attempt := 0
 	backoff := r.Config.BackoffMin
+	retried := false
 
 	for attempt <= r.Config.MaxRetries {
 		attempt++
@@ -66,6 +79,9 @@ func (r *Retryer) Do(ctx context.Context, fn func() (*http.Response, error)) (*h
 
 		// 如果没有错误且状态码不在重试列表中，直接返回
 		if err == nil && !shouldRetry(resp.StatusCode, r.Config.StatusCodes) {
+			if retried {
+				metrics.RetryResultTotal.WithLabelValues(provider, "success").Inc()
+			}
 			return resp, nil
 		}
 
@@ -74,12 +90,17 @@ func (r *Retryer) Do(ctx context.Context, fn func() (*http.Response, error)) (*h
 			break
 		}
 
+		// 记录一次重试，附带触发原因。
+		metrics.RetriesTotal.WithLabelValues(provider, retryReason(resp, err)).Inc()
+		retried = true
+
 		// 计算等待时间
 		waitTime := r.calculateWaitTime(resp, backoff, attempt)
 
 		// 等待
 		select {
 		case <-ctx.Done():
+			metrics.RetryResultTotal.WithLabelValues(provider, "canceled").Inc()
 			return nil, ctx.Err()
 		case <-time.After(waitTime):
 			// 继续重试
@@ -92,11 +113,35 @@ func (r *Retryer) Do(ctx context.Context, fn func() (*http.Response, error)) (*h
 		}
 	}
 
+	// 重试耗尽。
+	if retried {
+		metrics.RetryResultTotal.WithLabelValues(provider, "exhausted").Inc()
+	}
+
 	// 返回最后一次的结果
 	if err != nil {
 		return nil, err
 	}
 	return resp, nil
+}
+
+// retryReason classifies why a retry was triggered, for the retries_total
+// metric's "reason" label. Kept to a small, bounded set of values.
+func retryReason(resp *http.Response, err error) string {
+	if err != nil {
+		return "transport_error"
+	}
+	if resp == nil {
+		return "unknown"
+	}
+	switch {
+	case resp.StatusCode == http.StatusTooManyRequests:
+		return "rate_limited"
+	case resp.StatusCode >= 500:
+		return "upstream_5xx"
+	default:
+		return "status_" + strconv.Itoa(resp.StatusCode)
+	}
 }
 
 // shouldRetry 判断是否需要重试

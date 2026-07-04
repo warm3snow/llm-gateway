@@ -78,166 +78,69 @@ func (p *OpenAIProvider) GetBaseURL() string {
 	return p.BaseURL
 }
 
-// ChatCompletion 聊天补全
-func (p *OpenAIProvider) ChatCompletion(ctx context.Context, req *types.ChatCompletionRequest, opts *types.Options) (*http.Response, error) {
-	url := p.BaseURL + "/chat/completions"
-
-	// 转换请求
-	body, err := json.Marshal(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
+// sendRequest is a helper that marshals req, sets headers, and sends the request.
+// Pass nil for req on GET requests (body is omitted).
+func (p *OpenAIProvider) sendRequest(ctx context.Context, method, endpoint string, req interface{}) (*http.Response, error) {
+	var bodyBytes []byte
+	if req != nil {
+		var err error
+		bodyBytes, err = json.Marshal(req)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal request: %w", err)
+		}
 	}
 
-	// 创建 HTTP 请求
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
+	httpReq, err := http.NewRequestWithContext(ctx, method, p.BaseURL+endpoint, bytes.NewBuffer(bodyBytes))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// 设置请求头
-	httpReq.Header.Set("Content-Type", "application/json")
+	if req != nil {
+		httpReq.Header.Set("Content-Type", "application/json")
+	}
 	httpReq.Header.Set("Authorization", "Bearer "+p.APIKey)
 
-	// 发送请求
 	resp, err := p.HTTPClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("failed to send request: %w", err)
 	}
-
 	return resp, nil
+}
+
+// ChatCompletion 聊天补全
+func (p *OpenAIProvider) ChatCompletion(ctx context.Context, req *types.ChatCompletionRequest, opts *types.Options) (*http.Response, error) {
+	return p.sendRequest(ctx, "POST", "/chat/completions", req)
 }
 
 // Completion 文本补全
 func (p *OpenAIProvider) Completion(ctx context.Context, req *types.CompletionRequest, opts *types.Options) (*http.Response, error) {
-	url := p.BaseURL + "/completions"
-
-	body, err := json.Marshal(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+p.APIKey)
-
-	resp, err := p.HTTPClient.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
-	}
-
-	return resp, nil
+	return p.sendRequest(ctx, "POST", "/completions", req)
 }
 
 // Embedding 嵌入
 func (p *OpenAIProvider) Embedding(ctx context.Context, req *types.EmbeddingRequest, opts *types.Options) (*http.Response, error) {
-	url := p.BaseURL + "/embeddings"
-
-	body, err := json.Marshal(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+p.APIKey)
-
-	resp, err := p.HTTPClient.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
-	}
-
-	return resp, nil
+	return p.sendRequest(ctx, "POST", "/embeddings", req)
 }
 
 // ImageGeneration 图像生成
 func (p *OpenAIProvider) ImageGeneration(ctx context.Context, req map[string]interface{}, opts *types.Options) (*http.Response, error) {
-	url := p.BaseURL + "/images/generations"
-
-	body, err := json.Marshal(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+p.APIKey)
-
-	resp, err := p.HTTPClient.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
-	}
-
-	return resp, nil
+	return p.sendRequest(ctx, "POST", "/images/generations", req)
 }
 
 // AudioSpeech 文本转语音
 func (p *OpenAIProvider) AudioSpeech(ctx context.Context, req map[string]interface{}, opts *types.Options) (*http.Response, error) {
-	url := p.BaseURL + "/audio/speech"
-
-	body, err := json.Marshal(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(body))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+p.APIKey)
-
-	resp, err := p.HTTPClient.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
-	}
-
-	return resp, nil
+	return p.sendRequest(ctx, "POST", "/audio/speech", req)
 }
 
 // AudioTranscription 语音转文本
 func (p *OpenAIProvider) AudioTranscription(ctx context.Context, req map[string]interface{}, opts *types.Options) (*http.Response, error) {
-	url := p.BaseURL + "/audio/transcriptions"
-
-	// 处理 multipart form data
-	// 这里需要构造 multipart 请求
-	resp, err := p.HTTPClient.Post(url, "multipart/form-data", nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
-	}
-
-	return resp, nil
+	// TODO: construct multipart form-data request for audio file upload
+	return nil, fmt.Errorf("AudioTranscription not yet implemented")
 }
 
 // Models 获取模型列表
 func (p *OpenAIProvider) Models(ctx context.Context, opts *types.Options) (*http.Response, error) {
-	url := p.BaseURL + "/models"
-
-	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	httpReq.Header.Set("Authorization", "Bearer "+p.APIKey)
-
-	resp, err := p.HTTPClient.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
-	}
-
-	return resp, nil
+	return p.sendRequest(ctx, "GET", "/models", nil)
 }
 
 // TransformRequest 转换请求

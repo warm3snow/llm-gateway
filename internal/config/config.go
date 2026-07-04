@@ -3,19 +3,53 @@ package config
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"time"
 
 	"github.com/spf13/viper"
 	"github.com/warm3snow/llm-gateway/internal/types"
 )
 
+var envVarRegex = regexp.MustCompile(`\$\{([^}]+)\}`)
+
+// expandEnvInString replaces ${VAR} placeholders with environment variable values.
+func expandEnvInString(s string) string {
+	return envVarRegex.ReplaceAllStringFunc(s, func(match string) string {
+		name := match[2 : len(match)-1] // strip ${ and }
+		if val, ok := os.LookupEnv(name); ok {
+			return val
+		}
+		return match // leave unchanged if env var not set
+	})
+}
+
+// expandEnvInMap recursively expands ${VAR} placeholders in map values.
+func expandEnvInMap(m map[string]interface{}) {
+	for k, v := range m {
+		switch val := v.(type) {
+		case string:
+			m[k] = expandEnvInString(val)
+		case map[string]interface{}:
+			expandEnvInMap(val)
+		}
+	}
+}
+
 // Config 全局配置
 type Config struct {
 	Server   ServerConfig   `mapstructure:"server" json:"server" yaml:"server"`
 	Gateway  GatewayConfig  `mapstructure:"gateway" json:"gateway" yaml:"gateway"`
+	Database DatabaseConfig `mapstructure:"database" json:"database" yaml:"database"`
 	Cache    CacheConfig    `mapstructure:"cache" json:"cache" yaml:"cache"`
 	Logging  LoggingConfig  `mapstructure:"logging" json:"logging" yaml:"logging"`
 	Security SecurityConfig `mapstructure:"security" json:"security" yaml:"security"`
+}
+
+// DatabaseConfig 数据库配置
+type DatabaseConfig struct {
+	Driver   string `mapstructure:"driver" json:"driver" yaml:"driver"`
+	DSN      string `mapstructure:"dsn" json:"dsn" yaml:"dsn"`
+	LogLevel string `mapstructure:"logLevel" json:"logLevel" yaml:"logLevel"`
 }
 
 // ServerConfig 服务器配置
@@ -66,6 +100,9 @@ type SecurityConfig struct {
 	AllowedOrigins   []string `mapstructure:"allowedOrigins" json:"allowedOrigins" yaml:"allowedOrigins"`
 	RateLimitEnabled bool     `mapstructure:"rateLimitEnabled" json:"rateLimitEnabled" yaml:"rateLimitEnabled"`
 	RateLimit        int      `mapstructure:"rateLimit" json:"rateLimit" yaml:"rateLimit"`
+	AdminUser        string   `mapstructure:"adminUser" json:"adminUser" yaml:"adminUser"`
+	AdminPass        string   `mapstructure:"adminPass" json:"adminPass" yaml:"adminPass"`
+	JWTSecret        string   `mapstructure:"jwtSecret" json:"jwtSecret" yaml:"jwtSecret"`
 }
 
 // LoadConfig 加载配置
@@ -100,6 +137,17 @@ func LoadConfig(configPath string) (*Config, error) {
 	var cfg Config
 	if err := v.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
+	}
+
+	// Expand ${ENV_VAR} placeholders in provider API keys and other string fields
+	for name, opts := range cfg.Gateway.Providers {
+		if opts.APIKey != "" {
+			opts.APIKey = expandEnvInString(opts.APIKey)
+		}
+		if opts.CustomHost != "" {
+			opts.CustomHost = expandEnvInString(opts.CustomHost)
+		}
+		cfg.Gateway.Providers[name] = opts
 	}
 
 	// 验证配置
@@ -142,6 +190,13 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("security.allowedOrigins", []string{"*"})
 	v.SetDefault("security.rateLimitEnabled", false)
 	v.SetDefault("security.rateLimit", 100)
+	v.SetDefault("security.adminUser", "admin")
+	v.SetDefault("security.adminPass", "admin123")
+	v.SetDefault("security.jwtSecret", "llm-gateway-secret-change-in-production")
+
+	v.SetDefault("database.driver", "sqlite")
+	v.SetDefault("database.dsn", "llm-gateway.db")
+	v.SetDefault("database.logLevel", "warn")
 }
 
 // validateConfig 验证配置

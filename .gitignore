@@ -58,3 +58,24 @@ coverage.html
 # OS-specific files
 Thumbs.db
 Desktop.ini
+
+# Binaries
+llm-gateway
+bin/
+
+# Frontend build artifacts
+web/frontend/.next/
+web/frontend/node_modules/
+web/frontend/out/
+
+# Next.js build trace artifacts (repo root)
+.next/
+
+# SQLite databases
+*.db
+
+# Test coverage temp files
+/tmp/coverage.*
+
+# Playwright CLI page snapshots
+.playwright-cli/

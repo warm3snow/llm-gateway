@@ -17,7 +17,7 @@ func TestNewProxyHandler(t *testing.T) {
 		},
 	}
 
-	handler := NewProxyHandler(cfg)
+	handler := NewProxyHandler(cfg, nil)
 
 	assert.NotNil(t, handler)
 	assert.Equal(t, cfg, handler.Config)
@@ -34,7 +34,7 @@ func TestNewProxyHandlerWithConfig(t *testing.T) {
 		},
 	}
 
-	handler := NewProxyHandler(cfg)
+	handler := NewProxyHandler(cfg, nil)
 
 	assert.NotNil(t, handler)
 	assert.Equal(t, cfg, handler.Config)
@@ -49,7 +49,7 @@ func TestProxyHandler_Structure(t *testing.T) {
 		},
 	}
 
-	handler := NewProxyHandler(cfg)
+	handler := NewProxyHandler(cfg, nil)
 
 	// 验证结构字段
 	assert.NotNil(t, handler.Config)

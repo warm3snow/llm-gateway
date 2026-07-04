@@ -1,9 +1,0 @@
-@@ -220,7 +220,7 @@
- }
- 
- func TestConfig_EnvironmentVariables(t *testing.T) {
--	// 设置环境变量
-+	t.Skip("Skip environment variable test - requires special setup")
- 		os.Setenv("LLM_GATEWAY_SERVER_PORT", "9090")
- 		os.Setenv("LLM_GATEWAY_GATEWAY_DEFAULT_PROVIDER", "groq")
- 		defer func() {

@@ -1,0 +1,266 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/spf13/cobra"
+	"github.com/warm3snow/llm-gateway/internal/database"
+	"github.com/warm3snow/llm-gateway/internal/handler"
+	"github.com/warm3snow/llm-gateway/internal/logging"
+	"github.com/warm3snow/llm-gateway/internal/logstore"
+	"github.com/warm3snow/llm-gateway/internal/middleware"
+	"github.com/warm3snow/llm-gateway/internal/models"
+	"github.com/warm3snow/llm-gateway/internal/provider"
+	_ "github.com/warm3snow/llm-gateway/internal/provider/anthropic"
+	_ "github.com/warm3snow/llm-gateway/internal/provider/azure"
+	_ "github.com/warm3snow/llm-gateway/internal/provider/cohere"
+	_ "github.com/warm3snow/llm-gateway/internal/provider/deepseek"
+	_ "github.com/warm3snow/llm-gateway/internal/provider/gemini"
+	_ "github.com/warm3snow/llm-gateway/internal/provider/glm"
+	_ "github.com/warm3snow/llm-gateway/internal/provider/groq"
+	_ "github.com/warm3snow/llm-gateway/internal/provider/kimi"
+	_ "github.com/warm3snow/llm-gateway/internal/provider/mistral"
+	_ "github.com/warm3snow/llm-gateway/internal/provider/ollama"
+	_ "github.com/warm3snow/llm-gateway/internal/provider/openai"
+	"github.com/warm3snow/llm-gateway/internal/service"
+	"github.com/warm3snow/llm-gateway/pkg/cache"
+	"github.com/warm3snow/llm-gateway/pkg/proxy"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
+)
+
+// startTime tracks when the server process started, for /health uptime.
+var startTime = time.Now()
+
+// @title LLM Gateway API
+// @version 1.0
+// @description Unified API gateway for multiple LLM providers with virtual key management, response caching, and admin dashboard.
+// @termsOfService http://swagger.io/terms/
+
+// @contact.name API Support
+// @contact.url http://www.swagger.io/support
+// @contact.email support@swagger.io
+
+// @license.name MIT
+// @license.url https://opensource.org/licenses/MIT
+
+// @host localhost:8080
+// @BasePath
+// @schemes http https
+
+// @securityDefinitions.apikey BearerAuth
+// @in header
+// @name Authorization
+// @description Type "Bearer" followed by a space and JWT token.
+
+// @securityDefinitions.apikey VirtualKeyAuth
+// @in header
+// @name x-llm-gateway-api-key
+// @description Virtual key for API access
+
+func newServeCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "serve",
+		Short: "Start the LLM Gateway HTTP server (default)",
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			return persistentLoad()
+		},
+		RunE: runServe,
+		SilenceUsage: true,
+	}
+	return cmd
+}
+
+func runServe(cmd *cobra.Command, args []string) error {
+	cfg := loadedConfig
+
+	// Configure structured logging. JSON unless the operator explicitly
+	// selects a "text"/"console" format (handy for local development).
+	jsonLogs := cfg.Logging.Format != "text" && cfg.Logging.Format != "console"
+	logging.Init(cfg.Logging.Level, jsonLogs)
+
+	// Run auto-migration
+	migrateErr := database.Migrate(
+		&models.VirtualKey{},
+		&models.UsageRecord{},
+		&models.ProviderConfig{},
+		&models.CacheEntry{},
+		&models.ModelPricing{},
+	)
+	if migrateErr != nil {
+		log.Printf("Warning: Failed to run migration: %v", migrateErr)
+	}
+	defer database.Close()
+
+	// Start the asynchronous usage-record writer. Draining happens during
+	// graceful shutdown below so buffered records are flushed before exit.
+	logstore.Init(logstore.Options{})
+
+	// 初始化缓存
+	cacheCfg := &cache.Config{
+		Type:    cfg.Cache.Type,
+		RedisAddr: cfg.Cache.Redis.Addr,
+		RedisPass: cfg.Cache.Redis.Password,
+		MaxEntries: 1000,
+		DefaultTTL: cfg.Cache.DefaultTTL,
+	}
+	cacheInstance, cacheErr := cache.NewCache(cacheCfg)
+	if cacheErr != nil {
+		log.Printf("Warning: Failed to initialize cache: %v", cacheErr)
+	} else {
+		log.Printf("[CACHE] Initialized %s cache", cfg.Cache.Type)
+	}
+
+	// 设置 Gin 模式
+	ginMode := "release"
+	if cfg.Server.Mode != "" {
+		ginMode = cfg.Server.Mode
+	}
+	gin.SetMode(ginMode)
+
+	// 创建路由引擎
+	router := gin.New()
+
+	// 添加 Swagger 文档
+	setupSwagger(router)
+
+	// 添加全局中间件
+	router.Use(middleware.Logger())
+	router.Use(middleware.Recovery())
+	router.Use(middleware.CORS(cfg.Security.AllowedOrigins))
+
+	// 健康检查
+	router.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "healthy",
+			"version": "1.0.0",
+			"uptime":  time.Since(startTime).String(),
+		})
+	})
+
+	// Prometheus 指标端点
+	router.GET("/metrics", gin.WrapH(promhttp.Handler()))
+
+	// 日志输出已注册的提供商
+	log.Printf("[PROVIDER] Registered providers: %v", provider.GetGlobalFactory().ListProviders())
+
+	// 创建代理处理器
+	proxyHandler := proxy.NewProxyHandler(cfg, cacheInstance)
+
+	// VirtualKeyService for budget tracking on usage records.
+	virtualKeyService := service.NewVirtualKeyService()
+
+	// API 路由（需要虚拟密钥认证 + 缓存 + 用量记录）
+	v1 := router.Group("/v1")
+	v1.Use(middleware.VirtualKeyAuth(cfg))
+	v1.Use(middleware.UsageRecordMiddleware(cfg, virtualKeyService))
+	v1.Use(middleware.CacheMiddleware(cacheInstance))
+	{
+		v1.POST("/chat/completions", proxyHandler.HandleChatCompletion)
+		v1.POST("/completions", proxyHandler.HandleCompletion)
+		v1.POST("/embeddings", proxyHandler.HandleEmbedding)
+		v1.GET("/models", proxyHandler.HandleModels)
+		v1.POST("/images/generations", proxyHandler.HandleImageGeneration)
+		v1.POST("/audio/speech", proxyHandler.HandleAudioSpeech)
+		v1.POST("/audio/transcriptions", proxyHandler.HandleAudioTranscription)
+		v1.POST("/audio/translations", proxyHandler.HandleAudioTranslation)
+		v1.Any("/proxy/*path", proxyHandler.ProxyRequest)
+		v1.POST("/chat/completions/stream", proxyHandler.HandleStreamRequest)
+	}
+
+	// 认证路由（不需要JWT）
+	authHandler := handler.NewAuthHandler(cfg)
+	authHandler.RegisterRoutes(router)
+
+	// JWT 中间件（用于保护管理接口）
+	jwtMiddleware := middleware.JWTAuth(cfg)
+
+	// 管理界面路由（需要JWT保护）
+	adminHandler := handler.NewHandler(cfg)
+	adminHandler.RegisterRoutesWithAuth(router, jwtMiddleware)
+
+	// 统计路由（需要JWT保护）
+	statsHandler := handler.NewStatsHandler(cfg)
+	statsHandler.RegisterRoutesWithAuth(router, jwtMiddleware)
+
+	// 用量记录路由（需要JWT保护）
+	usageHandler := handler.NewUsageHandler()
+	usageHandler.RegisterRoutesWithAuth(router, jwtMiddleware)
+
+	// 虚拟密钥路由（需要JWT保护）
+	vkHandler := handler.NewVirtualKeyHandler()
+	vkHandler.RegisterRoutesWithAuth(router, jwtMiddleware)
+
+	// 创建 HTTP 服务器
+	srv := &http.Server{
+		Addr:         fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
+		Handler:      router,
+		ReadTimeout:  cfg.Server.ReadTimeout,
+		WriteTimeout: cfg.Server.WriteTimeout,
+	}
+
+	// 启动服务器（非阻塞）
+	go func() {
+		log.Printf("Starting LLM Gateway on %s:%d", cfg.Server.Host, cfg.Server.Port)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Failed to start server: %v", err)
+		}
+	}()
+
+	// 优雅关闭
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	log.Println("Shutting down server...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeout)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatalf("Server forced to shutdown: %v", err)
+	}
+
+	// Flush any buffered usage records before the DB connection closes.
+	logstore.ShutdownDefault(ctx)
+
+	log.Println("Server exited")
+	return nil
+}
+
+func setupSwagger(router *gin.Engine) {
+	// 读取 swagger.json 文件内容
+	swaggerJSON, err := os.ReadFile("docs/swagger.json")
+	if err != nil {
+		log.Printf("Warning: Failed to read swagger.json: %v", err)
+		// 尝试绝对路径
+		swaggerJSON, err = os.ReadFile("/Users/hxy/go/src/github.com/warm3snow/llm-gateway/docs/swagger.json")
+		if err != nil {
+			log.Printf("Error: Failed to read swagger.json with absolute path: %v", err)
+			swaggerJSON = []byte("{}")
+		} else {
+			log.Printf("Successfully read swagger.json with absolute path")
+		}
+	} else {
+		log.Printf("Successfully read swagger.json")
+	}
+
+	// 提供自定义的 swagger.json 文件（包含示例）
+	router.GET("/custom-swagger/doc.json", func(c *gin.Context) {
+		c.Header("Content-Type", "application/json")
+		c.String(200, string(swaggerJSON))
+	})
+
+	// Swagger UI - 指向自定义文件
+	url := ginSwagger.URL("/custom-swagger/doc.json")
+	router.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler, url))
+}

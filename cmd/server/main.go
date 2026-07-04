@@ -1,135 +1,105 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
-	"os/signal"
-	"syscall"
-	"time"
+	"strings"
 
-	"github.com/gin-gonic/gin"
+	"github.com/spf13/cobra"
 	"github.com/warm3snow/llm-gateway/internal/config"
-	"github.com/warm3snow/llm-gateway/internal/handler"
-	"github.com/warm3snow/llm-gateway/internal/middleware"
-	"github.com/warm3snow/llm-gateway/pkg/proxy"
+	"github.com/warm3snow/llm-gateway/internal/database"
 )
 
-func main() {
-	// 加载配置
-	configPath := config.GetConfigPath()
-	cfg, err := config.LoadConfig(configPath)
+// global config path flag value — set on the root command, read by subcommands.
+var configFile string
+
+// loadedConfig is the config loaded in PersistentPreRunE; subcommands read it.
+var loadedConfig *config.Config
+
+func newRootCmd() *cobra.Command {
+	rootCmd := &cobra.Command{
+		Use:   "llm-gateway",
+		Short: "LLM Gateway — unified API gateway for multiple LLM providers",
+		// Default behaviour: when invoked with no subcommand (or with an
+		// unknown one that we treat as "serve"), start the server. This keeps
+		// the old `./llm-gateway` invocation working.
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := persistentLoad(); err != nil {
+				return err
+			}
+			return runServe(cmd, args)
+		},
+		// Disable cobra's automatic `help`/`completion` subcommands' error
+		// printing when the user just runs the binary.
+		SilenceUsage: true,
+	}
+	rootCmd.PersistentFlags().StringVarP(&configFile, "config", "c", "", "path to config.yaml (defaults to configs/config.yaml)")
+
+	rootCmd.AddCommand(newServeCmd())
+	rootCmd.AddCommand(newFetchPricesCmd())
+
+	return rootCmd
+}
+
+// persistentLoad loads config + initializes the DB so subcommands can use them.
+// Called from each subcommand's PreRunE (rather than rootCmd.PersistentPreRunE)
+// so that `--help` and unknown args don't trigger DB connection.
+func persistentLoad() error {
+	cfg, err := config.LoadConfig(config.GetConfigPath())
 	if err != nil {
 		log.Printf("Warning: Failed to load config: %v, using defaults", err)
-		// 使用默认配置
 		cfg = &config.Config{
 			Server: config.ServerConfig{
 				Host:         "0.0.0.0",
 				Port:         8080,
-				ReadTimeout:  60 * time.Second,
-				WriteTimeout: 60 * time.Second,
+				ReadTimeout:  60 * 1000 * 1000 * 1000, // 60s
+				WriteTimeout: 60 * 1000 * 1000 * 1000,
 			},
 			Gateway: config.GatewayConfig{
 				DefaultProvider:   "openai",
 				GuardrailsEnabled: true,
 			},
+			Database: config.DatabaseConfig{
+				Driver:   "sqlite",
+				DSN:      "llm-gateway.db",
+				LogLevel: "warn",
+			},
 		}
 	}
+	loadedConfig = cfg
 
-	// 设置 Gin 模式
-	ginMode := "release"
-	if cfg.Server.Mode != "" {
-		ginMode = cfg.Server.Mode
+	dbCfg := &database.Config{
+		Driver:   cfg.Database.Driver,
+		DSN:      cfg.Database.DSN,
+		LogLevel: cfg.Database.LogLevel,
 	}
-	gin.SetMode(ginMode)
-
-	// 创建路由引擎
-	router := gin.New()
-
-	// 添加中间件
-	router.Use(middleware.Logger())
-	router.Use(middleware.Recovery())
-	router.Use(middleware.CORS(cfg.Security.AllowedOrigins))
-
-	// 健康检查
-	router.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{
-			"status":  "healthy",
-			"version": "1.0.0",
-			"uptime":  time.Since(startTime).String(),
-		})
-	})
-
-	// 创建代理处理器
-	proxyHandler := proxy.NewProxyHandler(cfg)
-
-	// API 路由
-	v1 := router.Group("/v1")
-	{
-		// 聊天补全
-		v1.POST("/chat/completions", proxyHandler.HandleChatCompletion)
-
-		// 文本补全
-		v1.POST("/completions", proxyHandler.HandleCompletion)
-
-		// 嵌入
-		v1.POST("/embeddings", proxyHandler.HandleEmbedding)
-
-		// 模型列表
-		v1.GET("/models", proxyHandler.HandleModels)
-
-		// 图像生成
-		v1.POST("/images/generations", proxyHandler.HandleImageGeneration)
-
-		// 音频处理
-		v1.POST("/audio/speech", proxyHandler.HandleAudioSpeech)
-		v1.POST("/audio/transcriptions", proxyHandler.HandleAudioTranscription)
-		v1.POST("/audio/translations", proxyHandler.HandleAudioTranslation)
-
-		// 代理端点
-		v1.Any("/proxy/*path", proxyHandler.ProxyRequest)
-
-		// 流式请求
-		v1.POST("/chat/completions/stream", proxyHandler.HandleStreamRequest)
+	if err := database.Connect(dbCfg); err != nil {
+		return fmt.Errorf("failed to connect to database: %w", err)
 	}
-
-	// 管理界面路由
-	adminHandler := handler.NewHandler(cfg)
-	adminHandler.RegisterRoutes(router)
-
-	// 创建 HTTP 服务器
-	srv := &http.Server{
-		Addr:         fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
-		Handler:      router,
-		ReadTimeout:  cfg.Server.ReadTimeout,
-		WriteTimeout: cfg.Server.WriteTimeout,
-	}
-
-	// 启动服务器（非阻塞）
-	go func() {
-		log.Printf("Starting LLM Gateway on %s:%d", cfg.Server.Host, cfg.Server.Port)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Failed to start server: %v", err)
-		}
-	}()
-
-	// 优雅关闭
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-
-	log.Println("Shutting down server...")
-
-	ctx, cancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeout)
-	defer cancel()
-
-	if err := srv.Shutdown(ctx); err != nil {
-		log.Fatalf("Server forced to shutdown: %v", err)
-	}
-
-	log.Println("Server exited")
+	return nil
 }
 
-var startTime = time.Now()
+func main() {
+	if err := newRootCmd().Execute(); err != nil {
+		// cobra prints errors itself; exit non-zero.
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+// commaList splits a comma-separated CLI flag value into trimmed entries.
+func commaList(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
