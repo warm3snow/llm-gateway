@@ -1,14 +1,53 @@
 "use client";
 
-import { useProviders } from "@/lib/queries";
+import { useState } from "react";
+import {
+  useProviders,
+  useCreateProvider,
+  useDeleteProvider,
+} from "@/lib/queries";
 import { PageHeader } from "@/components/ui/page-header";
-import { Panel, PanelHeader, PanelTitle, PanelBody } from "@/components/ui/panel";
+import { Panel, PanelHeader, PanelBody } from "@/components/ui/panel";
 import { Led } from "@/components/ui/led";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Button } from "@/components/ui/button";
-import { Server, Plus, Cpu, Globe, Gauge, Key } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+  SheetTrigger,
+  SheetFooter,
+} from "@/components/ui/sheet";
+import { toast } from "sonner";
+import { Server, Plus, Cpu, Globe, Gauge, Key, Trash2 } from "lucide-react";
+import { cn } from "@/lib/utils";
+
+const PROVIDER_TYPES = [
+  "openai",
+  "anthropic",
+  "gemini",
+  "azure",
+  "cohere",
+  "groq",
+  "deepseek",
+  "mistral",
+  "ollama",
+  "glm",
+  "kimi",
+] as const;
+
+// Shared styling for the native <select>, matching the <Input> component.
+const selectClass = cn(
+  "flex h-9 w-full rounded-sm border border-border bg-background/50 px-3 py-1 font-mono text-[13px] text-foreground ring-offset-background",
+  "focus-visible:outline-none focus-visible:border-primary/60 focus-visible:ring-1 focus-visible:ring-primary/40",
+  "disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
+);
 
 function maskKey(k?: string) {
   if (!k) return "—";
@@ -18,6 +57,58 @@ function maskKey(k?: string) {
 
 export default function ProvidersPage() {
   const { data: providers, isLoading } = useProviders();
+  const createMut = useCreateProvider();
+  const deleteMut = useDeleteProvider();
+
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [providerType, setProviderType] = useState<string>("openai");
+  const [apiKey, setApiKey] = useState("");
+  const [customHost, setCustomHost] = useState("");
+  const [weight, setWeight] = useState("1");
+  const [requestTimeout, setRequestTimeout] = useState("30000");
+
+  function resetForm() {
+    setName("");
+    setProviderType("openai");
+    setApiKey("");
+    setCustomHost("");
+    setWeight("1");
+    setRequestTimeout("30000");
+  }
+
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    if (!name.trim()) return;
+    try {
+      await createMut.mutateAsync({
+        name: name.trim(),
+        provider: providerType,
+        apiKey: apiKey.trim(),
+        customHost: customHost.trim() || undefined,
+        weight: parseInt(weight, 10) || 1,
+        requestTimeout: parseInt(requestTimeout, 10) || 30000,
+      });
+      toast.success("provider added", { description: name.trim() });
+      resetForm();
+      setOpen(false);
+    } catch (err) {
+      toast.error("failed to add provider", {
+        description: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  async function handleDelete(providerName: string) {
+    try {
+      await deleteMut.mutateAsync(providerName);
+      toast.success("provider removed", { description: providerName });
+    } catch (err) {
+      toast.error("failed to remove", {
+        description: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
 
   return (
     <div className="scan-in">
@@ -26,10 +117,113 @@ export default function ProvidersPage() {
         title="Providers"
         description="Upstream LLM backends and their routing configuration"
         actions={
-          <Button variant="outline" size="sm" disabled>
-            <Plus className="h-3.5 w-3.5" />
-            add provider
-          </Button>
+          <Sheet open={open} onOpenChange={setOpen}>
+            <SheetTrigger asChild>
+              <Button variant="outline" size="sm">
+                <Plus className="h-3.5 w-3.5" />
+                add provider
+              </Button>
+            </SheetTrigger>
+            <SheetContent side="right" className="w-full sm:max-w-md">
+              <SheetHeader className="space-y-2 border-b border-border pb-4">
+                <SheetTitle className="font-mono text-sm uppercase tracking-wider text-primary">
+                  add provider
+                </SheetTitle>
+                <SheetDescription className="font-mono text-[12px] text-muted-foreground">
+                  Configure an upstream LLM backend.
+                </SheetDescription>
+              </SheetHeader>
+              <form
+                onSubmit={handleCreate}
+                className="flex h-full flex-col gap-4 overflow-y-auto p-4"
+              >
+                <div className="space-y-2">
+                  <Label htmlFor="p-name">name</Label>
+                  <Input
+                    id="p-name"
+                    placeholder="openai-primary"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    autoFocus
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="p-type">provider type</Label>
+                  <select
+                    id="p-type"
+                    className={selectClass}
+                    value={providerType}
+                    onChange={(e) => setProviderType(e.target.value)}
+                  >
+                    {PROVIDER_TYPES.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="p-key">api key</Label>
+                  <Input
+                    id="p-key"
+                    type="password"
+                    placeholder="sk-..."
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="p-host">custom host (optional)</Label>
+                  <Input
+                    id="p-host"
+                    placeholder="https://api.example.com/v1"
+                    value={customHost}
+                    onChange={(e) => setCustomHost(e.target.value)}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="p-weight">weight</Label>
+                    <Input
+                      id="p-weight"
+                      type="number"
+                      value={weight}
+                      onChange={(e) => setWeight(e.target.value)}
+                      min="0"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="p-timeout">timeout (ms)</Label>
+                    <Input
+                      id="p-timeout"
+                      type="number"
+                      value={requestTimeout}
+                      onChange={(e) => setRequestTimeout(e.target.value)}
+                      min="0"
+                    />
+                  </div>
+                </div>
+                <SheetFooter className="mt-auto flex-row gap-2 border-t border-border pt-4">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setOpen(false)}
+                  >
+                    cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    size="sm"
+                    disabled={createMut.isPending || !name.trim()}
+                  >
+                    {createMut.isPending ? "adding…" : "add provider"}
+                  </Button>
+                </SheetFooter>
+              </form>
+            </SheetContent>
+          </Sheet>
         }
       />
 
@@ -109,10 +303,22 @@ export default function ProvidersPage() {
                 )}
               </PanelBody>
 
-              {/* Footer — terminal-style id strip */}
+              {/* Footer — terminal-style id strip + delete */}
               <div className="flex items-center justify-between border-t border-border px-4 py-2 font-mono text-[9px] uppercase tracking-wider text-muted-foreground/50">
                 <span>id://{p.provider}</span>
-                <span>configured</span>
+                <div className="flex items-center gap-2">
+                  <span>{p.enabled ? "configured" : "unconfigured"}</span>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="text-muted-foreground hover:text-destructive hover:border-destructive/40"
+                    onClick={() => handleDelete(p.name)}
+                    disabled={deleteMut.isPending || !p.enabled}
+                    aria-label={`Remove provider ${p.name}`}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
               </div>
             </Panel>
           ))}
