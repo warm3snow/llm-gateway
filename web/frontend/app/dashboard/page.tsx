@@ -48,11 +48,11 @@ function fmtPct(n?: number) {
 export default function DashboardPage() {
   const statsQ = useStats();
   const providersQ = useProviders();
-  const logsQ = useUsage();
+  const logsQ = useUsage({ limit: 100, offset: 0 });
 
   const stats = statsQ.data;
   const providers = providersQ.data ?? [];
-  const logs = logsQ.data ?? [];
+  const logs = logsQ.data?.records ?? [];
 
   // Synthesize a small spark series from recent logs so the chart always has
   // something to show. In a real deployment the backend would provide this.

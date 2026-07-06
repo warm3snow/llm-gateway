@@ -39,6 +39,9 @@ configs/config.prod.yaml
 # Logs
 *.log
 logs/
+# ...but keep the frontend source directory of the same name.
+!web/frontend/app/logs/
+!web/frontend/app/logs/**
 
 # Build artifacts
 /dist

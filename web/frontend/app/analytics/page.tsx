@@ -40,10 +40,10 @@ export default function AnalyticsPage() {
   const topProviders = stats?.topProviders ?? [];
   const maxCount = stats?.maxCount ?? 1;
 
-  // Cost series derived from timeSeries — for the cost trend line
+  // Cost series derived from timeSeries — real spend reported by the backend.
   const costSeries = series.map((p) => ({
     date: p.date,
-    cost: (p.count * 0.0012).toFixed(4),
+    cost: Number((p.cost ?? 0).toFixed(4)),
   }));
 
   return (

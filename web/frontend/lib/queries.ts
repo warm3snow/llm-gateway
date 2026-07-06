@@ -11,7 +11,6 @@ import type {
   ProvidersResponse,
   VirtualKey,
   VirtualKeysResponse,
-  UsageRecord,
   UsageResponse,
   ServerConfig,
 } from "./types";
@@ -69,10 +68,32 @@ export function useDeleteVirtualKey() {
   });
 }
 
-export function useUsage() {
-  return useQuery<UsageRecord[]>({
-    queryKey: queryKeys.usage,
-    queryFn: async () => (await api.getUsage()).records,
+export function useUsage(params?: {
+  limit?: number;
+  offset?: number;
+  provider?: string;
+  model?: string;
+  status_code?: number;
+}) {
+  return useQuery<UsageResponse>({
+    queryKey: [...queryKeys.usage, params],
+    queryFn: () => api.getUsage(params),
+  });
+}
+
+export function useCreateProvider() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: api.createProvider,
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.providers }),
+  });
+}
+
+export function useDeleteProvider() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => api.deleteProvider(name),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.providers }),
   });
 }
 

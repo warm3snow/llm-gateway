@@ -48,6 +48,7 @@ export interface UsageRecord {
 export interface TimeSeriesPoint {
   date: string;
   count: number;
+  cost: number;
 }
 
 export interface TopItem {
@@ -96,6 +97,7 @@ export interface VirtualKeysResponse {
 
 export interface UsageResponse {
   records: UsageRecord[];
+  total: number;
 }
 
 export interface LoginResponse {
