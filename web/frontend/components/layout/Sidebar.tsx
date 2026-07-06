@@ -15,6 +15,7 @@ import {
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
 import { useRouter } from "next/navigation";
+import { useStats } from "@/lib/queries";
 
 const routes = [
   { href: "/dashboard", label: "Dashboard", code: "dash", icon: LayoutDashboard },
@@ -28,6 +29,11 @@ const routes = [
 export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   const router = useRouter();
+
+  // Live gateway status derived from the stats query — green when the API
+  // responds, amber when it errors or is unreachable.
+  const { data: stats, isError, isLoading } = useStats();
+  const online = !isError && !isLoading && !!stats;
 
   const isActive = (href: string) =>
     pathname === href || pathname.startsWith(href + "/");
@@ -52,9 +58,16 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
           </span>
         </div>
         <div className="ml-auto flex items-center gap-1.5">
-          <span className="led bg-success text-success pulse-dot" />
+          <span
+            className={cn(
+              "led",
+              online
+                ? "bg-success text-success pulse-dot"
+                : "bg-warning text-warning"
+            )}
+          />
           <span className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
-            online
+            {online ? "online" : "offline"}
           </span>
         </div>
       </div>
@@ -114,8 +127,15 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       {/* System status footer */}
       <div className="border-t border-border px-4 py-3">
         <div className="mb-3 flex items-center justify-between font-mono text-[9px] uppercase tracking-wider text-muted-foreground/60">
-          <span>sys.uptime</span>
-          <span className="num text-muted-foreground">99.98%</span>
+          <span>sys.status</span>
+          <span
+            className={cn(
+              "num",
+              online ? "text-success" : "text-warning"
+            )}
+          >
+            {online ? "operational" : "degraded"}
+          </span>
         </div>
         <button
           onClick={handleLogout}
