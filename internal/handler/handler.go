@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/warm3snow/llm-gateway/internal/config"
+	"github.com/warm3snow/llm-gateway/internal/service"
 	"github.com/warm3snow/llm-gateway/internal/types"
 )
 
@@ -368,18 +369,32 @@ func (h *Handler) RemoveProvider(c *gin.Context) {
 // @Security BearerAuth
 // @Router /api/v1/admin/stats [get]
 func (h *Handler) GetStats(c *gin.Context) {
-	// TODO: 实现真实的统计信息
-	stats := gin.H{
-		"totalRequests":      1234,
-		"successfulRequests": 1200,
-		"failedRequests":     34,
-		"averageLatency":     "150ms",
-		"providersCount":     len(h.Config.Gateway.Providers),
-		"uptime":             "2h 30m",
+	// Legacy endpoint — superseded by /api/v1/stats/overview. Derive real
+	// figures from usage records instead of returning canned numbers.
+	overview, err := service.NewStatsService().GetOverview()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":  fmt.Sprintf("Failed to compute stats: %v", err),
+			"status": "error",
+		})
+		return
+	}
+
+	providersCount := overview.ActiveProviders
+	if providersCount == 0 {
+		providersCount = len(h.Config.Gateway.Providers)
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"stats":  stats,
+		"stats": gin.H{
+			"totalRequests":      overview.TotalRequests,
+			"successfulRequests": int64(float64(overview.TotalRequests) * overview.SuccessRate / 100),
+			"failedRequests":     overview.TotalRequests - int64(float64(overview.TotalRequests)*overview.SuccessRate/100),
+			"totalTokens":        overview.TotalTokens,
+			"totalCost":          overview.TotalCost,
+			"successRate":        overview.SuccessRate,
+			"providersCount":     providersCount,
+		},
 		"status": "success",
 	})
 }

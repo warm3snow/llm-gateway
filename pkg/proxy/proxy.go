@@ -499,6 +499,7 @@ func promptTextFromRequest(req *types.ChatCompletionRequest) string {
 // estimateTokens returns a rough token estimate using character heuristics:
 //   - ASCII / Latin: ~4 chars per token
 //   - CJK / other multibyte: ~1.5 chars per token
+//
 // This is intentionally cheap — it's only used when the upstream provider
 // doesn't return a real usage block (e.g. Ollama streaming).
 func estimateTokens(s string) int {
@@ -569,20 +570,63 @@ func (h *ProxyHandler) RegisterRoutes(router *gin.Engine) {
 
 // HandleImageGeneration 处理图像生成请求
 func (h *ProxyHandler) HandleImageGeneration(c *gin.Context) {
-	h.abortWithError(c, http.StatusNotImplemented, "not_implemented", "Image generation not implemented yet")
+	var req map[string]interface{}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		h.abortWithError(c, http.StatusBadRequest, "invalid_request_error", fmt.Sprintf("Invalid request: %v", err))
+		return
+	}
+
+	opts := h.getOptionsFromContext(c)
+	prov, err := provider.CreateProvider(opts.Provider, opts)
+	if err != nil {
+		h.abortWithError(c, http.StatusInternalServerError, "provider_error", fmt.Sprintf("Failed to create provider: %v", err))
+		return
+	}
+
+	resp, err := prov.ImageGeneration(c.Request.Context(), req, opts)
+	if err != nil {
+		h.abortWithError(c, http.StatusInternalServerError, "request_error", fmt.Sprintf("Request failed: %v", err))
+		return
+	}
+	defer resp.Body.Close()
+
+	h.handleResponse(c, resp)
 }
 
 // HandleAudioSpeech 处理文本转语音请求
 func (h *ProxyHandler) HandleAudioSpeech(c *gin.Context) {
-	h.abortWithError(c, http.StatusNotImplemented, "not_implemented", "Audio speech not implemented yet")
+	var req map[string]interface{}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		h.abortWithError(c, http.StatusBadRequest, "invalid_request_error", fmt.Sprintf("Invalid request: %v", err))
+		return
+	}
+
+	opts := h.getOptionsFromContext(c)
+	prov, err := provider.CreateProvider(opts.Provider, opts)
+	if err != nil {
+		h.abortWithError(c, http.StatusInternalServerError, "provider_error", fmt.Sprintf("Failed to create provider: %v", err))
+		return
+	}
+
+	// The upstream returns binary audio; handleResponse forwards it verbatim.
+	resp, err := prov.AudioSpeech(c.Request.Context(), req, opts)
+	if err != nil {
+		h.abortWithError(c, http.StatusInternalServerError, "request_error", fmt.Sprintf("Request failed: %v", err))
+		return
+	}
+	defer resp.Body.Close()
+
+	h.handleResponse(c, resp)
 }
 
 // HandleAudioTranscription 处理语音转文本请求
 func (h *ProxyHandler) HandleAudioTranscription(c *gin.Context) {
+	// TODO: multipart/form-data audio upload not yet supported by the provider layer.
 	h.abortWithError(c, http.StatusNotImplemented, "not_implemented", "Audio transcription not implemented yet")
 }
 
 // HandleAudioTranslation 处理语音翻译请求
 func (h *ProxyHandler) HandleAudioTranslation(c *gin.Context) {
+	// TODO: multipart/form-data audio upload not yet supported by the provider layer.
 	h.abortWithError(c, http.StatusNotImplemented, "not_implemented", "Audio translation not implemented yet")
 }

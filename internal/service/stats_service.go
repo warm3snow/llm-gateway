@@ -46,6 +46,12 @@ type summary struct {
 func (s *StatsService) computeSummary() summary {
 	var sum summary
 
+	// Guard against an uninitialized DB (e.g. in unit tests that don't spin up
+	// a database) — return zero-valued stats rather than panicking.
+	if s.db == nil {
+		return sum
+	}
+
 	s.db.Model(&models.UsageRecord{}).Count(&sum.TotalRequests)
 
 	var successCount int64
@@ -130,10 +136,16 @@ func (s *StatsService) GetAnalytics() (*AnalyticsData, error) {
 		SuccessRate:       sum.SuccessRate,
 	}
 
+	data.TimeSeries = []TimeSeriesPoint{}
+	data.TopModels = []TopModel{}
+	data.TopProviders = []TopProvider{}
+	if s.db == nil {
+		return data, nil
+	}
+
 	// Time series (last 7 days)
 	end := time.Now()
 	start := end.AddDate(0, 0, -7)
-	data.TimeSeries = []TimeSeriesPoint{}
 
 	var timePoints []struct {
 		Timestamp string  `json:"timestamp"`
@@ -159,7 +171,6 @@ func (s *StatsService) GetAnalytics() (*AnalyticsData, error) {
 	}
 
 	// Top models
-	data.TopModels = []TopModel{}
 	var topModels []struct {
 		Model string `json:"model"`
 		Count int64  `json:"count"`
@@ -176,7 +187,6 @@ func (s *StatsService) GetAnalytics() (*AnalyticsData, error) {
 	}
 
 	// Top providers
-	data.TopProviders = []TopProvider{}
 	var topProviders []struct {
 		Provider string `json:"provider"`
 		Count    int64  `json:"count"`
@@ -215,6 +225,9 @@ func (s *StatsService) GetHourlyTimeSeries(start, end time.Time) ([]TimeSeriesPo
 // optional [start, end] window.
 func (s *StatsService) timeSeries(groupExpr string, start, end time.Time) ([]TimeSeriesPoint, error) {
 	points := []TimeSeriesPoint{}
+	if s.db == nil {
+		return points, nil
+	}
 
 	var rows []struct {
 		Timestamp string  `gorm:"column:timestamp"`
