@@ -47,7 +47,7 @@ func TestRecovery(t *testing.T) {
 // TestCORS 测试 CORS 中间件
 func TestCORS(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	
+
 	tests := []struct {
 		name           string
 		allowedOrigins []string
@@ -96,7 +96,7 @@ func TestCORS(t *testing.T) {
 // TestAuth 测试认证中间件
 func TestAuth(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	
+
 	t.Run("Missing API key", func(t *testing.T) {
 		router := gin.New()
 		router.Use(Auth("x-api-key"))
@@ -147,7 +147,7 @@ func TestAuth(t *testing.T) {
 // TestRateLimit 测试限流中间件
 func TestRateLimit(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	
+
 	t.Run("Within limit", func(t *testing.T) {
 		router := gin.New()
 		router.Use(RateLimit(10))
@@ -189,10 +189,64 @@ func TestRequestID(t *testing.T) {
 	assert.NotEmpty(t, w.Body.String())
 }
 
+func TestShouldDeferProviderCheckForAuto(t *testing.T) {
+	tests := []struct {
+		name              string
+		method            string
+		path              string
+		body              []byte
+		requestedProvider string
+		expected          bool
+	}{
+		{
+			name:     "model auto without provider header defers",
+			method:   http.MethodPost,
+			path:     "/v1/chat/completions",
+			body:     []byte(`{"model":"auto","messages":[{"role":"user","content":"hi"}]}`),
+			expected: true,
+		},
+		{
+			name:     "omitted model without provider header defers",
+			method:   http.MethodPost,
+			path:     "/v1/chat/completions",
+			body:     []byte(`{"messages":[{"role":"user","content":"hi"}]}`),
+			expected: true,
+		},
+		{
+			name:     "concrete model does not defer",
+			method:   http.MethodPost,
+			path:     "/v1/chat/completions",
+			body:     []byte(`{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}`),
+			expected: false,
+		},
+		{
+			name:              "explicit provider does not defer",
+			method:            http.MethodPost,
+			path:              "/v1/chat/completions",
+			body:              []byte(`{"model":"auto","messages":[{"role":"user","content":"hi"}]}`),
+			requestedProvider: "openai-a",
+			expected:          false,
+		},
+		{
+			name:     "non chat route does not defer",
+			method:   http.MethodPost,
+			path:     "/v1/embeddings",
+			body:     []byte(`{"model":"auto","input":"hi"}`),
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, shouldDeferProviderCheckForAuto(tt.method, tt.path, tt.body, tt.requestedProvider))
+		})
+	}
+}
+
 // TestTimeout 测试超时中间件
 func TestTimeout(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	
+
 	t.Run("Within timeout", func(t *testing.T) {
 		router := gin.New()
 		router.Use(Timeout(5 * time.Second))
@@ -238,8 +292,8 @@ func BenchmarkRecovery(b *testing.B) {
 	router.Use(Recovery())
 
 	router.GET("/test", func(c *gin.Context) {
-			c.Status(http.StatusOK)
-		})
+		c.Status(http.StatusOK)
+	})
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

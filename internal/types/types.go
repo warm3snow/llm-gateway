@@ -125,7 +125,7 @@ type Message struct {
 
 // ChatCompletionRequest 聊天补全请求
 type ChatCompletionRequest struct {
-	Model            string                 `json:"model" binding:"required" example:"gpt-3.5-turbo"`
+	Model            string                 `json:"model,omitempty" example:"gpt-3.5-turbo"`
 	Messages         []Message              `json:"messages" binding:"required" example:"[{\"role\":\"user\",\"content\":\"Hello\"}]"`
 	Temperature      float64                `json:"temperature,omitempty" example:"0.7"`
 	TopP             float64                `json:"top_p,omitempty" example:"1.0"`
@@ -204,9 +204,9 @@ type ChatCompletionResponse struct {
 
 // Choice 选择
 type Choice struct {
-	Index        int         `json:"index"`
-	Message      Message     `json:"message"`
-	FinishReason string      `json:"finish_reason"`
+	Index        int     `json:"index"`
+	Message      Message `json:"message"`
+	FinishReason string  `json:"finish_reason"`
 }
 
 // Usage 使用情况

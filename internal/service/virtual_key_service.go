@@ -27,7 +27,7 @@ func NewVirtualKeyService() *VirtualKeyService {
 
 // Create creates a new virtual key
 // Returns the full key (shown only once) and the DB record
-func (s *VirtualKeyService) Create(req *models.VirtualKeyRequest) (string, *models.VirtualKey, error) {
+func (s *VirtualKeyService) Create(tenantID uint, req *models.VirtualKeyRequest) (string, *models.VirtualKey, error) {
 	// Generate a random 32-byte key
 	keyBytes := make([]byte, 32)
 	if _, err := rand.Read(keyBytes); err != nil {
@@ -45,15 +45,16 @@ func (s *VirtualKeyService) Create(req *models.VirtualKeyRequest) (string, *mode
 
 	// Create DB record
 	vk := &models.VirtualKey{
+		TenantID:        tenantID,
 		Name:            req.Name,
-		KeyHash:       keyHash,
-		KeySalt:       salt,
-		HashedKey:     fullKey[:12], // Store first 12 chars (vsk-xxxxxxxx) for identification
-		BudgetTotal:   req.BudgetTotal,
-		BudgetUsed:    0,
-		RateLimit:     req.RateLimit,
+		KeyHash:         keyHash,
+		KeySalt:         salt,
+		HashedKey:       fullKey[:12], // Store first 12 chars (vsk-xxxxxxxx) for identification
+		BudgetTotal:     req.BudgetTotal,
+		BudgetUsed:      0,
+		RateLimit:       req.RateLimit,
 		RateLimitWindow: req.RateLimitWindow,
-		Status:        "active",
+		Status:          "active",
 	}
 
 	if vk.RateLimitWindow == 0 {
@@ -77,10 +78,10 @@ func (s *VirtualKeyService) Create(req *models.VirtualKeyRequest) (string, *mode
 	return fullKey, vk, nil
 }
 
-// GetByID retrieves a virtual key by ID
-func (s *VirtualKeyService) GetByID(id uint) (*models.VirtualKey, error) {
+// GetByID retrieves a virtual key by ID, scoped to tenantID (0 = any tenant).
+func (s *VirtualKeyService) GetByID(tenantID, id uint) (*models.VirtualKey, error) {
 	var vk models.VirtualKey
-	if err := s.db.First(&vk, id).Error; err != nil {
+	if err := s.db.Scopes(database.TenantScope(tenantID)).First(&vk, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, errors.New("virtual key not found")
 		}
@@ -122,19 +123,19 @@ func (s *VirtualKeyService) ValidateKey(key string) (*models.VirtualKey, error) 
 	return nil, errors.New("invalid virtual key")
 }
 
-// List returns all virtual keys
-func (s *VirtualKeyService) List() ([]models.VirtualKey, error) {
+// List returns all virtual keys for a tenant (tenantID 0 = all tenants).
+func (s *VirtualKeyService) List(tenantID uint) ([]models.VirtualKey, error) {
 	var keys []models.VirtualKey
-	if err := s.db.Order("created_at DESC").Find(&keys).Error; err != nil {
+	if err := s.db.Scopes(database.TenantScope(tenantID)).Order("created_at DESC").Find(&keys).Error; err != nil {
 		return nil, err
 	}
 	return keys, nil
 }
 
-// Update updates a virtual key
-func (s *VirtualKeyService) Update(id uint, req *models.VirtualKeyRequest) (*models.VirtualKey, error) {
+// Update updates a virtual key, scoped to tenantID (0 = any tenant).
+func (s *VirtualKeyService) Update(tenantID, id uint, req *models.VirtualKeyRequest) (*models.VirtualKey, error) {
 	var vk models.VirtualKey
-	if err := s.db.First(&vk, id).Error; err != nil {
+	if err := s.db.Scopes(database.TenantScope(tenantID)).First(&vk, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, errors.New("virtual key not found")
 		}
@@ -144,7 +145,7 @@ func (s *VirtualKeyService) Update(id uint, req *models.VirtualKeyRequest) (*mod
 	if req.Name != "" {
 		vk.Name = req.Name
 	}
-	if req.BudgetTotal > 0 {
+	if req.BudgetTotal >= 0 {
 		vk.BudgetTotal = req.BudgetTotal
 	}
 	if req.RateLimit >= 0 {
@@ -167,10 +168,14 @@ func (s *VirtualKeyService) Update(id uint, req *models.VirtualKeyRequest) (*mod
 	return &vk, nil
 }
 
-// Delete soft-deletes a virtual key
-func (s *VirtualKeyService) Delete(id uint) error {
-	if err := s.db.Delete(&models.VirtualKey{}, id).Error; err != nil {
-		return fmt.Errorf("failed to delete virtual key: %w", err)
+// Delete soft-deletes a virtual key, scoped to tenantID (0 = any tenant).
+func (s *VirtualKeyService) Delete(tenantID, id uint) error {
+	res := s.db.Scopes(database.TenantScope(tenantID)).Delete(&models.VirtualKey{}, id)
+	if res.Error != nil {
+		return fmt.Errorf("failed to delete virtual key: %w", res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return errors.New("virtual key not found")
 	}
 	return nil
 }
@@ -191,6 +196,7 @@ func (s *VirtualKeyService) TrackUsage(id uint, cost float64) error {
 func (s *VirtualKeyService) ToResponse(vk *models.VirtualKey, fullKey string) *models.VirtualKeyResponse {
 	resp := &models.VirtualKeyResponse{
 		ID:              vk.ID,
+		TenantID:        vk.TenantID,
 		Name:            vk.Name,
 		KeyHashPrefix:   vk.HashedKey + "...",
 		BudgetTotal:     vk.BudgetTotal,

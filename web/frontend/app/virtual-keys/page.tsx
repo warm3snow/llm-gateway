@@ -1,7 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { useVirtualKeys, useCreateVirtualKey, useDeleteVirtualKey } from "@/lib/queries";
+import {
+  useVirtualKeys,
+  useProviders,
+  useCreateVirtualKey,
+  useUpdateVirtualKey,
+  useDeleteVirtualKey,
+} from "@/lib/queries";
+import type { VirtualKey } from "@/lib/types";
 import { PageHeader } from "@/components/ui/page-header";
 import { Panel, PanelHeader, PanelTitle, PanelBody } from "@/components/ui/panel";
 import { Led } from "@/components/ui/led";
@@ -21,7 +28,7 @@ import {
   SheetFooter,
 } from "@/components/ui/sheet";
 import { toast } from "sonner";
-import { KeyRound, Plus, Trash2, Copy, Wallet } from "lucide-react";
+import { KeyRound, Plus, Trash2, Copy, Wallet, Pencil, Gauge, Server } from "lucide-react";
 
 function fmtUsd(n?: number) {
   if (n == null) return "0.0000";
@@ -32,13 +39,26 @@ function pct(used?: number, total?: number) {
   return Math.min(100, ((used ?? 0) / total) * 100);
 }
 
+function parseProviders(value?: string) {
+  if (!value) return [];
+  return value.split(",").map((p) => p.trim()).filter(Boolean);
+}
+
 export default function VirtualKeysPage() {
   const { data: keys, isLoading } = useVirtualKeys();
+  const { data: providers } = useProviders();
   const createMut = useCreateVirtualKey();
+  const updateMut = useUpdateVirtualKey();
   const deleteMut = useDeleteVirtualKey();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [budget, setBudget] = useState("");
+  const [editOpen, setEditOpen] = useState(false);
+  const [editing, setEditing] = useState<VirtualKey | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editBudget, setEditBudget] = useState("");
+  const [editRateLimit, setEditRateLimit] = useState("0");
+  const [editProviderNames, setEditProviderNames] = useState<string[]>([]);
 
   function resetForm() {
     setName("");
@@ -60,6 +80,47 @@ export default function VirtualKeysPage() {
       setOpen(false);
     } catch (err) {
       toast.error("failed to create key", {
+        description: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  function openEdit(key: VirtualKey) {
+    setEditing(key);
+    setEditName(key.name);
+    setEditBudget(String(key.budget_total ?? 0));
+    setEditRateLimit(String(key.rate_limit ?? 0));
+    setEditProviderNames(parseProviders(key.providers));
+    setEditOpen(true);
+  }
+
+  function toggleProvider(name: string) {
+    setEditProviderNames((current) =>
+      current.includes(name)
+        ? current.filter((p) => p !== name)
+        : [...current, name]
+    );
+  }
+
+  async function handleUpdate(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editing) return;
+    try {
+      await updateMut.mutateAsync({
+        id: editing.id,
+        data: {
+          name: editName.trim(),
+          budget_total: parseFloat(editBudget) || 0,
+          rate_limit: parseInt(editRateLimit, 10) || 0,
+          rate_limit_window: 60,
+          providers: editProviderNames,
+        },
+      });
+      toast.success("virtual key updated", { description: editName.trim() });
+      setEditOpen(false);
+      setEditing(null);
+    } catch (err) {
+      toast.error("failed to update key", {
         description: err instanceof Error ? err.message : String(err),
       });
     }
@@ -149,6 +210,74 @@ export default function VirtualKeysPage() {
         }
       />
 
+      <Sheet open={editOpen} onOpenChange={setEditOpen}>
+        <SheetContent side="right" className="w-full sm:max-w-md">
+          <SheetHeader className="space-y-2 border-b border-border pb-4">
+            <SheetTitle className="font-mono text-sm uppercase tracking-wider text-primary">
+              edit virtual key
+            </SheetTitle>
+            <SheetDescription className="font-mono text-[12px] text-muted-foreground">
+              Empty provider binding means all providers are allowed.
+            </SheetDescription>
+          </SheetHeader>
+          <form onSubmit={handleUpdate} className="flex h-full flex-col gap-4 overflow-y-auto p-4">
+            <div className="space-y-2">
+              <Label htmlFor="ek-name">name</Label>
+              <Input id="ek-name" value={editName} onChange={(e) => setEditName(e.target.value)} required />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label htmlFor="ek-budget">budget (usd)</Label>
+                <Input id="ek-budget" type="number" value={editBudget} onChange={(e) => setEditBudget(e.target.value)} step="0.01" min="0" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="ek-rate">rate limit / min</Label>
+                <Input id="ek-rate" type="number" value={editRateLimit} onChange={(e) => setEditRateLimit(e.target.value)} min="0" />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>bound providers</Label>
+              <div className="rounded-sm border border-border bg-background/40 p-3 font-mono text-[12px]">
+                <button
+                  type="button"
+                  className="mb-2 text-muted-foreground hover:text-primary"
+                  onClick={() => setEditProviderNames([])}
+                >
+                  bind all providers
+                </button>
+                <div className="space-y-2">
+                  {(providers || []).map((p) => (
+                    <label key={p.name} className="flex items-center gap-2 text-muted-foreground">
+                      <input
+                        type="checkbox"
+                        checked={editProviderNames.includes(p.name)}
+                        onChange={() => toggleProvider(p.name)}
+                      />
+                      <span>{p.name}</span>
+                      <span className="text-[10px] text-muted-foreground/60">{p.provider}</span>
+                    </label>
+                  ))}
+                  {(!providers || providers.length === 0) && (
+                    <span className="text-muted-foreground/60">no providers configured</span>
+                  )}
+                </div>
+              </div>
+              <p className="font-mono text-[10px] text-muted-foreground">
+                current: {editProviderNames.length === 0 ? "all providers" : editProviderNames.join(", ")}
+              </p>
+            </div>
+            <SheetFooter className="mt-auto flex-row gap-2 border-t border-border pt-4">
+              <Button type="button" variant="outline" size="sm" onClick={() => setEditOpen(false)}>
+                cancel
+              </Button>
+              <Button type="submit" size="sm" disabled={updateMut.isPending || !editName.trim()}>
+                {updateMut.isPending ? "saving…" : "save changes"}
+              </Button>
+            </SheetFooter>
+          </form>
+        </SheetContent>
+      </Sheet>
+
       {isLoading ? (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {Array.from({ length: 6 }).map((_, i) => (
@@ -167,6 +296,7 @@ export default function VirtualKeysPage() {
             const usage = pct(k.budget_used, k.budget_total);
             const isActive = k.status === "active";
             const overBudget = usage >= 100;
+            const boundProviders = parseProviders(k.providers);
             return (
               <Panel key={k.id} className="flex flex-col">
                 <PanelHeader>
@@ -196,7 +326,6 @@ export default function VirtualKeysPage() {
                 </PanelHeader>
 
                 <PanelBody className="flex-1 space-y-3">
-                  {/* Budget readout */}
                   <div className="space-y-1.5">
                     <div className="flex items-baseline justify-between font-mono text-[11px]">
                       <span className="flex items-center gap-1.5 text-muted-foreground">
@@ -212,7 +341,6 @@ export default function VirtualKeysPage() {
                         </span>
                       </span>
                     </div>
-                    {/* Progress bar — phosphor fill */}
                     <div className="relative h-1.5 overflow-hidden rounded-sm bg-secondary">
                       <div
                         className={`absolute inset-y-0 left-0 ${
@@ -227,6 +355,24 @@ export default function VirtualKeysPage() {
                       {usage.toFixed(1)}% used
                     </div>
                   </div>
+                  <div className="space-y-2 font-mono text-[11px]">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="flex items-center gap-1.5 text-muted-foreground">
+                        <Gauge className="h-3 w-3" /> rate limit
+                      </span>
+                      <span className="num text-foreground">
+                        {k.rate_limit && k.rate_limit > 0 ? `${k.rate_limit}/min` : "unlimited"}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="flex items-center gap-1.5 text-muted-foreground">
+                        <Server className="h-3 w-3" /> providers
+                      </span>
+                      <span className="truncate text-muted-foreground">
+                        {boundProviders.length === 0 ? "all" : boundProviders.join(", ")}
+                      </span>
+                    </div>
+                  </div>
                 </PanelBody>
 
                 {/* Footer — created date + actions */}
@@ -239,6 +385,15 @@ export default function VirtualKeysPage() {
                     })}
                   </span>
                   <div className="flex items-center gap-1">
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className="text-muted-foreground hover:text-primary"
+                      onClick={() => openEdit(k)}
+                      aria-label="Edit key"
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
                     <Button
                       variant="ghost"
                       size="icon-sm"

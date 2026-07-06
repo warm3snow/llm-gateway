@@ -4,8 +4,10 @@ import { useState } from "react";
 import {
   useProviders,
   useCreateProvider,
+  useUpdateProvider,
   useDeleteProvider,
 } from "@/lib/queries";
+import type { Provider } from "@/lib/types";
 import { PageHeader } from "@/components/ui/page-header";
 import { Panel, PanelHeader, PanelBody } from "@/components/ui/panel";
 import { Led } from "@/components/ui/led";
@@ -25,7 +27,7 @@ import {
   SheetFooter,
 } from "@/components/ui/sheet";
 import { toast } from "sonner";
-import { Server, Plus, Cpu, Globe, Gauge, Key, Trash2 } from "lucide-react";
+import { Server, Plus, Cpu, Globe, Gauge, Key, Trash2, Pencil } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const PROVIDER_TYPES = [
@@ -58,6 +60,7 @@ function maskKey(k?: string) {
 export default function ProvidersPage() {
   const { data: providers, isLoading } = useProviders();
   const createMut = useCreateProvider();
+  const updateMut = useUpdateProvider();
   const deleteMut = useDeleteProvider();
 
   const [open, setOpen] = useState(false);
@@ -67,6 +70,13 @@ export default function ProvidersPage() {
   const [customHost, setCustomHost] = useState("");
   const [weight, setWeight] = useState("1");
   const [requestTimeout, setRequestTimeout] = useState("30000");
+  const [editOpen, setEditOpen] = useState(false);
+  const [editing, setEditing] = useState<Provider | null>(null);
+  const [editProviderType, setEditProviderType] = useState("openai");
+  const [editApiKey, setEditApiKey] = useState("");
+  const [editCustomHost, setEditCustomHost] = useState("");
+  const [editWeight, setEditWeight] = useState("1");
+  const [editRequestTimeout, setEditRequestTimeout] = useState("30000");
 
   function resetForm() {
     setName("");
@@ -94,6 +104,40 @@ export default function ProvidersPage() {
       setOpen(false);
     } catch (err) {
       toast.error("failed to add provider", {
+        description: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  function openEdit(provider: Provider) {
+    setEditing(provider);
+    setEditProviderType(provider.provider || "openai");
+    setEditApiKey("");
+    setEditCustomHost(provider.customHost || "");
+    setEditWeight(String(provider.weight || 1));
+    setEditRequestTimeout(String(provider.requestTimeout || 30000));
+    setEditOpen(true);
+  }
+
+  async function handleUpdate(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editing) return;
+    try {
+      await updateMut.mutateAsync({
+        name: editing.name,
+        data: {
+          provider: editProviderType,
+          apiKey: editApiKey.trim() || undefined,
+          customHost: editCustomHost.trim() || undefined,
+          weight: parseInt(editWeight, 10) || 1,
+          requestTimeout: parseInt(editRequestTimeout, 10) || 30000,
+        },
+      });
+      toast.success("provider updated", { description: editing.name });
+      setEditOpen(false);
+      setEditing(null);
+    } catch (err) {
+      toast.error("failed to update provider", {
         description: err instanceof Error ? err.message : String(err),
       });
     }
@@ -227,6 +271,75 @@ export default function ProvidersPage() {
         }
       />
 
+      <Sheet open={editOpen} onOpenChange={setEditOpen}>
+        <SheetContent side="right" className="w-full sm:max-w-md">
+          <SheetHeader className="space-y-2 border-b border-border pb-4">
+            <SheetTitle className="font-mono text-sm uppercase tracking-wider text-primary">
+              edit provider
+            </SheetTitle>
+            <SheetDescription className="font-mono text-[12px] text-muted-foreground">
+              API key is unchanged when left blank.
+            </SheetDescription>
+          </SheetHeader>
+          <form onSubmit={handleUpdate} className="flex h-full flex-col gap-4 overflow-y-auto p-4">
+            <div className="space-y-2">
+              <Label htmlFor="ep-name">name</Label>
+              <Input id="ep-name" value={editing?.name || ""} disabled />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="ep-type">provider type</Label>
+              <select
+                id="ep-type"
+                className={selectClass}
+                value={editProviderType}
+                onChange={(e) => setEditProviderType(e.target.value)}
+              >
+                {PROVIDER_TYPES.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="ep-key">new api key (optional)</Label>
+              <Input
+                id="ep-key"
+                type="password"
+                placeholder="leave blank to keep existing"
+                value={editApiKey}
+                onChange={(e) => setEditApiKey(e.target.value)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="ep-host">custom host (optional)</Label>
+              <Input
+                id="ep-host"
+                placeholder="https://api.example.com/v1"
+                value={editCustomHost}
+                onChange={(e) => setEditCustomHost(e.target.value)}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <Label htmlFor="ep-weight">weight</Label>
+                <Input id="ep-weight" type="number" value={editWeight} onChange={(e) => setEditWeight(e.target.value)} min="0" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="ep-timeout">timeout (ms)</Label>
+                <Input id="ep-timeout" type="number" value={editRequestTimeout} onChange={(e) => setEditRequestTimeout(e.target.value)} min="0" />
+              </div>
+            </div>
+            <SheetFooter className="mt-auto flex-row gap-2 border-t border-border pt-4">
+              <Button type="button" variant="outline" size="sm" onClick={() => setEditOpen(false)}>
+                cancel
+              </Button>
+              <Button type="submit" size="sm" disabled={updateMut.isPending || !editing}>
+                {updateMut.isPending ? "saving…" : "save changes"}
+              </Button>
+            </SheetFooter>
+          </form>
+        </SheetContent>
+      </Sheet>
+
       {isLoading ? (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {Array.from({ length: 6 }).map((_, i) => (
@@ -308,6 +421,15 @@ export default function ProvidersPage() {
                 <span>id://{p.provider}</span>
                 <div className="flex items-center gap-2">
                   <span>{p.enabled ? "configured" : "unconfigured"}</span>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="text-muted-foreground hover:text-primary"
+                    onClick={() => openEdit(p)}
+                    aria-label={`Edit provider ${p.name}`}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
                   <Button
                     variant="ghost"
                     size="icon-sm"

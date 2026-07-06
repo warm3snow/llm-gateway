@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/warm3snow/llm-gateway/internal/database"
+	"github.com/warm3snow/llm-gateway/internal/middleware"
 	"github.com/warm3snow/llm-gateway/internal/models"
 	"github.com/warm3snow/llm-gateway/internal/service"
 	"github.com/warm3snow/llm-gateway/internal/types"
@@ -73,7 +74,15 @@ func (h *VirtualKeyHandler) Create(c *gin.Context) {
 		return
 	}
 
-	fullKey, vk, err := h.service.Create(&req)
+	// Resolve the owning tenant. tenant_admin -> own tenant; super_admin may
+	// target a tenant via ?tenant_id=, otherwise the key lands in the default
+	// tenant rather than becoming unscoped/orphaned.
+	tenantID := middleware.EffectiveTenantID(c)
+	if tenantID == 0 {
+		tenantID = database.DefaultTenantID
+	}
+
+	fullKey, vk, err := h.service.Create(tenantID, &req)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, types.ErrorResponse{
 			Message: fmt.Sprintf("Failed to create virtual key: %v", err),
@@ -103,7 +112,7 @@ func (h *VirtualKeyHandler) Create(c *gin.Context) {
 // @Security BearerAuth
 // @Router /api/v1/virtual-keys [get]
 func (h *VirtualKeyHandler) List(c *gin.Context) {
-	keys, err := h.service.List()
+	keys, err := h.service.List(middleware.EffectiveTenantID(c))
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, types.ErrorResponse{
 			Message: fmt.Sprintf("Failed to list virtual keys: %v", err),
@@ -148,7 +157,7 @@ func (h *VirtualKeyHandler) Get(c *gin.Context) {
 		return
 	}
 
-	vk, err := h.service.GetByID(uint(id))
+	vk, err := h.service.GetByID(middleware.EffectiveTenantID(c), uint(id))
 	if err != nil {
 		status := http.StatusInternalServerError
 		if err.Error() == "virtual key not found" {
@@ -203,7 +212,7 @@ func (h *VirtualKeyHandler) Update(c *gin.Context) {
 		return
 	}
 
-	vk, err := h.service.Update(uint(id), &req)
+	vk, err := h.service.Update(middleware.EffectiveTenantID(c), uint(id), &req)
 	if err != nil {
 		status := http.StatusInternalServerError
 		if err.Error() == "virtual key not found" {
@@ -249,7 +258,7 @@ func (h *VirtualKeyHandler) Delete(c *gin.Context) {
 		return
 	}
 
-	if err := h.service.Delete(uint(id)); err != nil {
+	if err := h.service.Delete(middleware.EffectiveTenantID(c), uint(id)); err != nil {
 		status := http.StatusInternalServerError
 		if err.Error() == "virtual key not found" {
 			status = http.StatusNotFound
@@ -293,7 +302,7 @@ func (h *VirtualKeyHandler) Reset(c *gin.Context) {
 	}
 
 	var vk models.VirtualKey
-	if err := h.db.First(&vk, uint(id)).Error; err != nil {
+	if err := h.db.Scopes(database.TenantScope(middleware.EffectiveTenantID(c))).First(&vk, uint(id)).Error; err != nil {
 		status := http.StatusInternalServerError
 		if err == gorm.ErrRecordNotFound {
 			status = http.StatusNotFound

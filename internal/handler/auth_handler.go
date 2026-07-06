@@ -1,13 +1,18 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/warm3snow/llm-gateway/internal/config"
+	"github.com/warm3snow/llm-gateway/internal/database"
+	"github.com/warm3snow/llm-gateway/internal/models"
 	"github.com/warm3snow/llm-gateway/internal/types"
+	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 )
 
 // AuthHandler handles authentication requests
@@ -57,18 +62,26 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	// Simple username/password check against config
-	// In production, use proper user management with hashed passwords
-	adminUser := h.cfg.Security.AdminUser
-	adminPass := h.cfg.Security.AdminPass
-	if adminUser == "" {
-		adminUser = "admin"
-	}
-	if adminPass == "" {
-		adminPass = "admin123" // default, should be changed
+	// Look up the user in the database and verify the bcrypt password hash.
+	// The config admin is seeded as a super_admin during bootstrap.
+	var user models.User
+	err := database.GetDB().Where("username = ?", req.Username).First(&user).Error
+	if err != nil || user.Status != "active" {
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, types.ErrorResponse{
+				Message: "Internal error",
+				Type:    "internal_error",
+			})
+			return
+		}
+		c.AbortWithStatusJSON(http.StatusUnauthorized, types.ErrorResponse{
+			Message: "Invalid username or password",
+			Type:    "authentication_error",
+		})
+		return
 	}
 
-	if req.Username != adminUser || req.Password != adminPass {
+	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)) != nil {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, types.ErrorResponse{
 			Message: "Invalid username or password",
 			Type:    "authentication_error",
@@ -77,7 +90,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	}
 
 	// Generate JWT token
-	token, err := generateToken(req.Username, h.cfg.Security.JWTSecret)
+	token, err := generateToken(&user, h.cfg.Security.JWTSecret)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, types.ErrorResponse{
 			Message: "Failed to generate token",
@@ -92,15 +105,21 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	})
 }
 
-// generateToken generates a JWT token for the given username
-func generateToken(username, secret string) (string, error) {
+// generateToken generates a JWT token for the given user, embedding the role
+// and tenant scope so downstream middleware can enforce data isolation.
+func generateToken(u *models.User, secret string) (string, error) {
 	if secret == "" {
 		secret = "llm-gateway-secret-change-in-production"
 	}
 
 	claims := jwt.MapClaims{
-		"username": username,
+		"username": u.Username,
+		"role":     u.Role,
 		"exp":      time.Now().Add(24 * time.Hour).Unix(),
+	}
+	// super_admin has no tenant binding (TenantID == nil).
+	if u.TenantID != nil {
+		claims["tenant_id"] = *u.TenantID
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)

@@ -11,11 +11,13 @@ import {
   Settings,
   Power,
   TerminalSquare,
+  Building2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { api } from "@/lib/api";
+import { api, currentRole } from "@/lib/api";
 import { useRouter } from "next/navigation";
 import { useStats } from "@/lib/queries";
+import { useEffect, useState } from "react";
 
 const routes = [
   { href: "/dashboard", label: "Dashboard", code: "dash", icon: LayoutDashboard },
@@ -26,9 +28,22 @@ const routes = [
   { href: "/settings", label: "Settings", code: "conf", icon: Settings },
 ];
 
+// Routes visible only to a platform super_admin.
+const superAdminRoutes = [
+  { href: "/tenants", label: "Tenants", code: "tnnt", icon: Building2 },
+];
+
 export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   const router = useRouter();
+
+  // Role is read client-side from the JWT (UI gating only). Resolve after
+  // mount to avoid SSR/hydration mismatch on the cookie read.
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  useEffect(() => {
+    setIsSuperAdmin(currentRole() === "super_admin");
+  }, []);
+  const navRoutes = isSuperAdmin ? [...routes, ...superAdminRoutes] : routes;
 
   // Live gateway status derived from the stats query — green when the API
   // responds, amber when it errors or is unreachable.
@@ -81,7 +96,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 
       {/* Nav */}
       <nav className="flex-1 space-y-0.5 px-2">
-        {routes.map((route) => {
+        {navRoutes.map((route) => {
           const active = isActive(route.href);
           return (
             <Link

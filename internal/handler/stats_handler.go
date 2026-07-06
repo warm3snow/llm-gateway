@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/warm3snow/llm-gateway/internal/config"
+	"github.com/warm3snow/llm-gateway/internal/middleware"
 	"github.com/warm3snow/llm-gateway/internal/service"
 	"github.com/warm3snow/llm-gateway/internal/types"
 )
@@ -61,7 +62,7 @@ func windowFromQuery(c *gin.Context) (time.Time, time.Time) {
 // GET /api/v1/stats/hourly?hours=24
 func (h *StatsHandler) GetHourly(c *gin.Context) {
 	start, end := windowFromQuery(c)
-	points, err := h.service.GetHourlyTimeSeries(start, end)
+	points, err := h.service.GetHourlyTimeSeries(middleware.EffectiveTenantID(c), start, end)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, types.ErrorResponse{
 			Message: "Failed to get hourly stats",
@@ -85,7 +86,7 @@ func (h *StatsHandler) GetHourly(c *gin.Context) {
 // @Security BearerAuth
 // @Router /api/v1/stats/overview [get]
 func (h *StatsHandler) GetOverview(c *gin.Context) {
-	overview, err := h.service.GetOverview()
+	overview, err := h.service.GetOverview(middleware.EffectiveTenantID(c))
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, types.ErrorResponse{
 			Message: "Failed to get stats overview",
@@ -96,7 +97,9 @@ func (h *StatsHandler) GetOverview(c *gin.Context) {
 
 	// If no usage recorded yet, count configured providers
 	if overview.ActiveProviders == 0 {
+		h.cfg.Gateway.ProvidersMu.RLock()
 		overview.ActiveProviders = len(h.cfg.Gateway.Providers)
+		h.cfg.Gateway.ProvidersMu.RUnlock()
 	}
 
 	c.JSON(http.StatusOK, overview)
@@ -105,7 +108,7 @@ func (h *StatsHandler) GetOverview(c *gin.Context) {
 // GetAnalytics returns analytics data for the analytics page
 // GET /api/v1/stats/analytics
 func (h *StatsHandler) GetAnalytics(c *gin.Context) {
-	data, err := h.service.GetAnalytics()
+	data, err := h.service.GetAnalytics(middleware.EffectiveTenantID(c))
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, types.ErrorResponse{
 			Message: "Failed to get analytics data",
@@ -116,7 +119,9 @@ func (h *StatsHandler) GetAnalytics(c *gin.Context) {
 
 	// If no usage recorded yet, count configured providers
 	if data.ActiveProviders == 0 {
+		h.cfg.Gateway.ProvidersMu.RLock()
 		data.ActiveProviders = len(h.cfg.Gateway.Providers)
+		h.cfg.Gateway.ProvidersMu.RUnlock()
 	}
 
 	c.JSON(http.StatusOK, data)

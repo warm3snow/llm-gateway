@@ -17,6 +17,7 @@ import (
 // concrete relationship between a virtual key's budget and consumed tokens.
 type UsageRecord struct {
 	ID             uint      `gorm:"primaryKey" json:"id"`
+	TenantID       uint      `gorm:"index;not null;default:1" json:"tenant_id"`
 	RequestID      string    `gorm:"size:64;index" json:"request_id"`
 	VirtualKeyID   *uint     `gorm:"index" json:"virtual_key_id,omitempty"`
 	VirtualKeyName string    `gorm:"size:100" json:"virtual_key_name,omitempty"`

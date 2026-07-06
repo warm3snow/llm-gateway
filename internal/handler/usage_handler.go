@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/warm3snow/llm-gateway/internal/middleware"
 	"github.com/warm3snow/llm-gateway/internal/service"
 	"github.com/warm3snow/llm-gateway/internal/types"
 )
@@ -74,7 +75,7 @@ func (h *UsageHandler) GetRecords(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
 	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
 
-	records, total, err := h.service.GetRecords(provider, model, statusCode, startDate, endDate, limit, offset)
+	records, total, err := h.service.GetRecords(middleware.EffectiveTenantID(c), provider, model, statusCode, startDate, endDate, limit, offset)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, types.ErrorResponse{
 			Message: "Failed to get usage records",
@@ -117,7 +118,7 @@ func (h *UsageHandler) GetRecord(c *gin.Context) {
 		return
 	}
 
-	record, err := h.service.GetRecordByID(uint(id))
+	record, err := h.service.GetRecordByID(middleware.EffectiveTenantID(c), uint(id))
 	if err != nil {
 		status := http.StatusInternalServerError
 		if err.Error() == "record not found" {

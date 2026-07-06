@@ -15,6 +15,9 @@ import type {
   ServerConfig,
 } from "./types";
 
+type UpdateProviderData = Parameters<typeof api.updateProvider>[1];
+type UpdateVirtualKeyData = Parameters<typeof api.updateVirtualKey>[1];
+
 export const queryKeys = {
   stats: ["stats"] as const,
   analytics: ["analytics"] as const,
@@ -60,6 +63,15 @@ export function useCreateVirtualKey() {
   });
 }
 
+export function useUpdateVirtualKey() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, data }: { id: number; data: UpdateVirtualKeyData }) =>
+      api.updateVirtualKey(id, data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.virtualKeys }),
+  });
+}
+
 export function useDeleteVirtualKey() {
   const qc = useQueryClient();
   return useMutation({
@@ -85,6 +97,15 @@ export function useCreateProvider() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: api.createProvider,
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.providers }),
+  });
+}
+
+export function useUpdateProvider() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ name, data }: { name: string; data: UpdateProviderData }) =>
+      api.updateProvider(name, data),
     onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.providers }),
   });
 }

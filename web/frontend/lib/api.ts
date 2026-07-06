@@ -10,6 +10,10 @@ import type {
   AnalyticsData,
   ServerConfig,
   LoginResponse,
+  TenantsResponse,
+  TenantUsersResponse,
+  Tenant,
+  TenantUser,
 } from './types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
@@ -28,7 +32,7 @@ async function apiFetch<T>(endpoint: string, options: RequestInit = {}): Promise
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
-    throw new Error(err.message || `API Error: ${res.statusText}`);
+    throw new Error(err.error || err.message || `API Error: ${res.statusText}`);
   }
   const text = await res.text();
   if (!text) return undefined as unknown as T;
@@ -85,6 +89,17 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  updateProvider: (name: string, data: {
+    provider: string;
+    apiKey?: string;
+    customHost?: string;
+    weight?: number;
+    requestTimeout?: number;
+  }) =>
+    apiFetch<void>(`/api/v1/admin/providers/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
   deleteProvider: (name: string) =>
     apiFetch<void>(`/api/v1/admin/providers/${encodeURIComponent(name)}`, {
       method: 'DELETE',
@@ -94,11 +109,65 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  updateVirtualKey: (id: string | number, data: {
+    name?: string;
+    budget_total?: number;
+    rate_limit?: number;
+    rate_limit_window?: number;
+    providers?: string[];
+  }) =>
+    apiFetch<VirtualKey>(`/api/v1/virtual-keys/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
   deleteVirtualKey: (id: string | number) =>
     apiFetch<void>(`/api/v1/virtual-keys/${id}`, {
       method: 'DELETE',
     }),
+  // Tenant management (super_admin only).
+  getTenants: () => apiFetch<TenantsResponse>('/api/v1/tenants'),
+  createTenant: (data: { name: string; slug: string }) =>
+    apiFetch<{ tenant: Tenant }>('/api/v1/tenants', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  setTenantStatus: (id: number, status: string) =>
+    apiFetch<void>(`/api/v1/tenants/${id}/status`, {
+      method: 'PUT',
+      body: JSON.stringify({ status }),
+    }),
+  getTenantUsers: (tenantId?: number) =>
+    apiFetch<TenantUsersResponse>(
+      `/api/v1/tenants/users${tenantId ? `?tenant_id=${tenantId}` : ''}`
+    ),
+  createTenantUser: (data: {
+    username: string;
+    password: string;
+    tenant_id: number;
+    role?: string;
+  }) =>
+    apiFetch<{ user: TenantUser }>('/api/v1/tenants/users', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
 };
+
+// currentRole decodes the (unverified) JWT payload to read the user's role.
+// This is UI-only gating; the backend independently enforces authorization.
+export function currentRole(): string | null {
+  const token = getCookie('auth_token');
+  if (!token || typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length < 2) return null;
+  try {
+    const payload = JSON.parse(
+      atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'))
+    );
+    return payload.role ?? null;
+  } catch {
+    return null;
+  }
+}
 
 export const queryClient = new QueryClient({
   defaultOptions: {

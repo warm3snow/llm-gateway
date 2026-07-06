@@ -85,14 +85,24 @@ func UsageRecordMiddleware(cfg *config.Config, virtualKeyService *service.Virtua
 
 		c.Next()
 
-		// Extract provider: header > config default
+		// Extract provider: selected auto-mode provider > header > config default.
 		provider := c.GetHeader("x-llm-provider")
+		if selectedProvider, exists := c.Get("selected_provider"); exists {
+			if value, ok := selectedProvider.(string); ok && value != "" {
+				provider = value
+			}
+		}
 		if provider == "" {
 			provider = defaultProvider
 		}
 
-		// Extract model from the saved request body
+		// Extract model: selected auto-mode model > saved request body/header.
 		model := extractModelFromBytes(requestBody, c)
+		if selectedModel, exists := c.Get("selected_model"); exists {
+			if value, ok := selectedModel.(string); ok && value != "" {
+				model = value
+			}
+		}
 
 		// Parse tokens: prefer the streaming usage stashed by pkg/proxy,
 		// then fall back to parsing the captured (non-stream) response body.
@@ -139,6 +149,11 @@ func UsageRecordMiddleware(cfg *config.Config, virtualKeyService *service.Virtua
 			}
 		}
 
+		tenantID := GetUserTenantID(c)
+		if tenantID == 0 {
+			tenantID = database.DefaultTenantID
+		}
+
 		// Decrement the virtual key's budget synchronously so budgets stay
 		// consistent with the recorded cost.
 		if virtualKeyService != nil && virtualKeyID != nil && cost > 0 {
@@ -166,6 +181,7 @@ func UsageRecordMiddleware(cfg *config.Config, virtualKeyService *service.Virtua
 		}
 
 		record := models.UsageRecord{
+			TenantID:       tenantID,
 			RequestID:      requestID,
 			VirtualKeyID:   virtualKeyID,
 			VirtualKeyName: virtualKeyName,

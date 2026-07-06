@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -8,18 +9,20 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/warm3snow/llm-gateway/internal/config"
+	"github.com/warm3snow/llm-gateway/internal/middleware"
 	"github.com/warm3snow/llm-gateway/internal/service"
 	"github.com/warm3snow/llm-gateway/internal/types"
 )
 
 // Handler 管理界面处理器
 type Handler struct {
-	Config *config.Config
+	Config      *config.Config
+	providerSvc *service.ProviderConfigService
 }
 
 // NewHandler 创建处理器
 func NewHandler(cfg *config.Config) *Handler {
-	return &Handler{Config: cfg}
+	return &Handler{Config: cfg, providerSvc: service.NewProviderConfigService()}
 }
 
 // RegisterRoutes 注册路由（无JWT保护，用于向后兼容）
@@ -57,6 +60,7 @@ func (h *Handler) RegisterRoutesWithAuth(router *gin.Engine, jwtMiddleware gin.H
 		// Provider 管理
 		api.GET("/providers", h.GetProviders)
 		api.POST("/providers", h.AddProvider)
+		api.PUT("/providers/:name", h.UpdateProvider)
 		api.DELETE("/providers/:name", h.RemoveProvider)
 
 		// 统计信息
@@ -179,6 +183,42 @@ type ProviderResponse struct {
 	RequestTimeout int    `json:"requestTimeout"`
 }
 
+type providerRequest struct {
+	Name string `json:"name"`
+	types.Options
+}
+
+func providerResponse(name string, opts types.Options, enabled bool) ProviderResponse {
+	return ProviderResponse{
+		Name:           name,
+		Provider:       opts.Provider,
+		APIKey:         maskAPIKey(opts.APIKey),
+		CustomHost:     opts.CustomHost,
+		Weight:         opts.Weight,
+		Enabled:        enabled,
+		RequestTimeout: opts.RequestTimeout,
+	}
+}
+
+func (h *Handler) syncProviderInMemory(name string, opts types.Options) {
+	h.Config.Gateway.ProvidersMu.Lock()
+	defer h.Config.Gateway.ProvidersMu.Unlock()
+	if h.Config.Gateway.Providers == nil {
+		h.Config.Gateway.Providers = make(map[string]types.Options)
+	}
+	h.Config.Gateway.Providers[name] = opts
+}
+
+func (h *Handler) providerResponsesFromMemory() []ProviderResponse {
+	h.Config.Gateway.ProvidersMu.RLock()
+	defer h.Config.Gateway.ProvidersMu.RUnlock()
+	providers := make([]ProviderResponse, 0, len(h.Config.Gateway.Providers))
+	for name, opts := range h.Config.Gateway.Providers {
+		providers = append(providers, providerResponse(name, opts, true))
+	}
+	return providers
+}
+
 // GetProviders 获取所有 Provider
 // GET /api/v1/admin/providers
 // @Summary Get providers
@@ -192,33 +232,33 @@ type ProviderResponse struct {
 // @Security BearerAuth
 // @Router /api/v1/admin/providers [get]
 func (h *Handler) GetProviders(c *gin.Context) {
-	providers := []ProviderResponse{}
-
-	// Build the list from the supportedProviders whitelist
-	for _, name := range h.Config.Gateway.SupportedProviders {
-		opts, configured := h.Config.Gateway.Providers[name]
-		providerName := name
-		apiKey := ""
-		customHost := ""
-		weight := 0
-		requestTimeout := 0
-		enabled := configured
-		if configured {
-			providerName = opts.Provider
-			apiKey = maskAPIKey(opts.APIKey)
-			customHost = opts.CustomHost
-			weight = opts.Weight
-			requestTimeout = opts.RequestTimeout
+	rows, err := h.providerSvc.List()
+	if err != nil {
+		if errors.Is(err, service.ErrProviderStoreUnavailable) {
+			c.JSON(http.StatusOK, gin.H{
+				"data":   h.providerResponsesFromMemory(),
+				"status": "success",
+			})
+			return
 		}
-		providers = append(providers, ProviderResponse{
-			Name:           name,
-			Provider:       providerName,
-			APIKey:         apiKey,
-			CustomHost:     customHost,
-			Weight:         weight,
-			Enabled:        enabled,
-			RequestTimeout: requestTimeout,
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":  fmt.Sprintf("Failed to list providers: %v", err),
+			"status": "error",
 		})
+		return
+	}
+
+	providers := make([]ProviderResponse, 0, len(rows))
+	for i := range rows {
+		opts, err := h.providerSvc.ToOptions(&rows[i])
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error":  fmt.Sprintf("Failed to decode provider '%s': %v", rows[i].Name, err),
+				"status": "error",
+			})
+			return
+		}
+		providers = append(providers, providerResponse(rows[i].Name, opts, rows[i].Enabled))
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -242,17 +282,7 @@ func (h *Handler) GetProviders(c *gin.Context) {
 // @Security BearerAuth
 // @Router /api/v1/admin/providers [post]
 func (h *Handler) AddProvider(c *gin.Context) {
-	var req struct {
-		Name           string                 `json:"name" binding:"required"`
-		Provider       string                 `json:"provider" binding:"required"`
-		APIKey         string                 `json:"apiKey"`
-		VirtualKey     string                 `json:"virtualKey"`
-		CustomHost     string                 `json:"customHost"`
-		Weight         int                    `json:"weight"`
-		RequestTimeout int                    `json:"requestTimeout"`
-		Extra          map[string]interface{} `json:"extra"`
-	}
-
+	var req providerRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":  fmt.Sprintf("Invalid request: %v", err),
@@ -260,57 +290,101 @@ func (h *Handler) AddProvider(c *gin.Context) {
 		})
 		return
 	}
-
-	// 检查是否已存在
-	if _, exists := h.Config.Gateway.Providers[req.Name]; exists {
-		c.JSON(http.StatusConflict, gin.H{
-			"error":  fmt.Sprintf("Provider '%s' already exists", req.Name),
+	if req.Name == "" || req.Provider == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":  "name and provider are required",
 			"status": "error",
 		})
 		return
 	}
 
-	// 创建 Provider 配置
-	opts := &types.Options{
-		Provider:       req.Provider,
-		APIKey:         req.APIKey,
-		VirtualKey:     req.VirtualKey,
-		CustomHost:     req.CustomHost,
-		Weight:         req.Weight,
-		RequestTimeout: req.RequestTimeout,
-	}
-
-	// 添加到配置
-	if h.Config.Gateway.Providers == nil {
-		h.Config.Gateway.Providers = make(map[string]types.Options)
-	}
-	h.Config.Gateway.Providers[req.Name] = *opts
-
-	// 保存到文件
-	configPath := config.GetConfigPath()
-	if err := config.SaveConfig(h.Config, configPath); err != nil {
+	opts := req.Options
+	created, err := h.providerSvc.Create(req.Name, opts)
+	if err != nil {
+		if errors.Is(err, service.ErrProviderAlreadyExists) {
+			c.JSON(http.StatusConflict, gin.H{
+				"error":  fmt.Sprintf("Provider '%s' already exists", req.Name),
+				"status": "error",
+			})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":  fmt.Sprintf("Failed to save config: %v", err),
+			"error":  fmt.Sprintf("Failed to create provider: %v", err),
 			"status": "error",
 		})
 		return
 	}
 
-	// 注册 Provider（这里只是示例，实际应该根据 provider 类型动态注册）
-	// 注意：这里需要在程序启动时预先注册所有支持的 provider
-	// 或者提供一个 factory 函数来创建 provider
-	fmt.Printf("Provider '%s' registered\n", req.Name)
+	runtimeOpts, err := h.providerSvc.ToOptions(created)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":  fmt.Sprintf("Failed to decode provider: %v", err),
+			"status": "error",
+		})
+		return
+	}
+	h.syncProviderInMemory(req.Name, runtimeOpts)
 
 	c.JSON(http.StatusOK, gin.H{
-		"message": fmt.Sprintf("Provider '%s' added successfully", req.Name),
-		"status":  "success",
-		"provider": gin.H{
-			"name":       req.Name,
-			"provider":   req.Provider,
-			"apiKey":     maskAPIKey(req.APIKey),
-			"customHost": req.CustomHost,
-			"weight":     req.Weight,
-		},
+		"message":  fmt.Sprintf("Provider '%s' added successfully", req.Name),
+		"status":   "success",
+		"provider": providerResponse(req.Name, runtimeOpts, created.Enabled),
+	})
+}
+
+// UpdateProvider updates an existing provider configuration.
+// PUT /api/v1/admin/providers/:name
+func (h *Handler) UpdateProvider(c *gin.Context) {
+	name := c.Param("name")
+	var req providerRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":  fmt.Sprintf("Invalid request: %v", err),
+			"status": "error",
+		})
+		return
+	}
+	if req.Provider == "" {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":  "provider is required",
+			"status": "error",
+		})
+		return
+	}
+
+	opts := req.Options
+	updated, err := h.providerSvc.Update(name, opts)
+	if err != nil {
+		if errors.Is(err, service.ErrProviderNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error":  fmt.Sprintf("Provider '%s' not found", name),
+				"status": "error",
+			})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":  fmt.Sprintf("Failed to update provider: %v", err),
+			"status": "error",
+		})
+		return
+	}
+
+	// Empty apiKey means "keep existing" on update. Re-decode DB row so the
+	// runtime cache gets the existing decrypted key instead of an empty key.
+	runtimeOpts, err := h.providerSvc.ToOptions(updated)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":  fmt.Sprintf("Failed to decode provider: %v", err),
+			"status": "error",
+		})
+		return
+	}
+	h.syncProviderInMemory(name, runtimeOpts)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":  fmt.Sprintf("Provider '%s' updated successfully", name),
+		"status":   "success",
+		"provider": providerResponse(name, runtimeOpts, updated.Enabled),
 	})
 }
 
@@ -330,26 +404,36 @@ func (h *Handler) AddProvider(c *gin.Context) {
 func (h *Handler) RemoveProvider(c *gin.Context) {
 	name := c.Param("name")
 
-	if _, exists := h.Config.Gateway.Providers[name]; !exists {
-		c.JSON(http.StatusNotFound, gin.H{
-			"error":  fmt.Sprintf("Provider '%s' not found", name),
-			"status": "error",
-		})
-		return
+	if err := h.providerSvc.Delete(name); err != nil {
+		if errors.Is(err, service.ErrProviderStoreUnavailable) {
+			h.Config.Gateway.ProvidersMu.RLock()
+			_, exists := h.Config.Gateway.Providers[name]
+			h.Config.Gateway.ProvidersMu.RUnlock()
+			if !exists {
+				c.JSON(http.StatusNotFound, gin.H{
+					"error":  fmt.Sprintf("Provider '%s' not found", name),
+					"status": "error",
+				})
+				return
+			}
+		} else if errors.Is(err, service.ErrProviderNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{
+				"error":  fmt.Sprintf("Provider '%s' not found", name),
+				"status": "error",
+			})
+			return
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error":  fmt.Sprintf("Failed to remove provider: %v", err),
+				"status": "error",
+			})
+			return
+		}
 	}
 
-	// 删除 Provider
+	h.Config.Gateway.ProvidersMu.Lock()
 	delete(h.Config.Gateway.Providers, name)
-
-	// 保存到文件
-	configPath := config.GetConfigPath()
-	if err := config.SaveConfig(h.Config, configPath); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":  fmt.Sprintf("Failed to save config: %v", err),
-			"status": "error",
-		})
-		return
-	}
+	h.Config.Gateway.ProvidersMu.Unlock()
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": fmt.Sprintf("Provider '%s' removed successfully", name),
@@ -371,7 +455,7 @@ func (h *Handler) RemoveProvider(c *gin.Context) {
 func (h *Handler) GetStats(c *gin.Context) {
 	// Legacy endpoint — superseded by /api/v1/stats/overview. Derive real
 	// figures from usage records instead of returning canned numbers.
-	overview, err := service.NewStatsService().GetOverview()
+	overview, err := service.NewStatsService().GetOverview(middleware.EffectiveTenantID(c))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":  fmt.Sprintf("Failed to compute stats: %v", err),
@@ -382,7 +466,9 @@ func (h *Handler) GetStats(c *gin.Context) {
 
 	providersCount := overview.ActiveProviders
 	if providersCount == 0 {
+		h.Config.Gateway.ProvidersMu.RLock()
 		providersCount = len(h.Config.Gateway.Providers)
+		h.Config.Gateway.ProvidersMu.RUnlock()
 	}
 
 	c.JSON(http.StatusOK, gin.H{

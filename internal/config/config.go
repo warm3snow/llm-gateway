@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"sync"
 	"time"
 
 	"github.com/spf13/viper"
@@ -64,12 +65,27 @@ type ServerConfig struct {
 
 // GatewayConfig 网关配置
 type GatewayConfig struct {
+	ProvidersMu        sync.RWMutex             `mapstructure:"-" json:"-" yaml:"-"`
 	DefaultProvider    string                   `mapstructure:"defaultProvider" json:"defaultProvider" yaml:"defaultProvider"`
 	Providers          map[string]types.Options `mapstructure:"providers" json:"providers" yaml:"providers"`
 	DefaultConfig      *types.Config            `mapstructure:"defaultConfig" json:"defaultConfig" yaml:"defaultConfig"`
 	GuardrailsEnabled  bool                     `mapstructure:"guardrailsEnabled" json:"guardrailsEnabled" yaml:"guardrailsEnabled"`
 	MaxRequestTimeout  int                      `mapstructure:"maxRequestTimeout" json:"maxRequestTimeout" yaml:"maxRequestTimeout"`
 	SupportedProviders []string                 `mapstructure:"supportedProviders" json:"supportedProviders" yaml:"supportedProviders"`
+	AutoMode           AutoModeConfig           `mapstructure:"autoMode" json:"autoMode" yaml:"autoMode"`
+}
+
+// AutoModeConfig controls dynamic provider/model selection for chat requests.
+type AutoModeConfig struct {
+	Enabled                     bool    `mapstructure:"enabled" json:"enabled" yaml:"enabled"`
+	CostWeight                  float64 `mapstructure:"costWeight" json:"costWeight" yaml:"costWeight"`
+	ConcurrencyWeight           float64 `mapstructure:"concurrencyWeight" json:"concurrencyWeight" yaml:"concurrencyWeight"`
+	RecentUsageWeight           float64 `mapstructure:"recentUsageWeight" json:"recentUsageWeight" yaml:"recentUsageWeight"`
+	ErrorWeight                 float64 `mapstructure:"errorWeight" json:"errorWeight" yaml:"errorWeight"`
+	ProviderWeightPenaltyWeight float64 `mapstructure:"providerWeightPenaltyWeight" json:"providerWeightPenaltyWeight" yaml:"providerWeightPenaltyWeight"`
+	RecentWindowSeconds         int     `mapstructure:"recentWindowSeconds" json:"recentWindowSeconds" yaml:"recentWindowSeconds"`
+	DefaultMaxConcurrency       int     `mapstructure:"defaultMaxConcurrency" json:"defaultMaxConcurrency" yaml:"defaultMaxConcurrency"`
+	DefaultOutputTokens         int     `mapstructure:"defaultOutputTokens" json:"defaultOutputTokens" yaml:"defaultOutputTokens"`
 }
 
 // CacheConfig 缓存配置
@@ -103,6 +119,11 @@ type SecurityConfig struct {
 	AdminUser        string   `mapstructure:"adminUser" json:"adminUser" yaml:"adminUser"`
 	AdminPass        string   `mapstructure:"adminPass" json:"adminPass" yaml:"adminPass"`
 	JWTSecret        string   `mapstructure:"jwtSecret" json:"jwtSecret" yaml:"jwtSecret"`
+	// EncryptionKey is a 64-char hex string (32 bytes) used to encrypt sensitive
+	// data (e.g. provider API keys) at rest. If empty, a deterministic key is
+	// derived from JWTSecret at startup. Set this explicitly in production so
+	// stored ciphertext remains decryptable across restarts and secret rotations.
+	EncryptionKey string `mapstructure:"encryptionKey" json:"encryptionKey" yaml:"encryptionKey"`
 }
 
 // LoadConfig 加载配置
@@ -170,6 +191,15 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("gateway.defaultProvider", "openai")
 	v.SetDefault("gateway.guardrailsEnabled", true)
 	v.SetDefault("gateway.maxRequestTimeout", 120000)
+	v.SetDefault("gateway.autoMode.enabled", true)
+	v.SetDefault("gateway.autoMode.costWeight", 0.50)
+	v.SetDefault("gateway.autoMode.concurrencyWeight", 0.25)
+	v.SetDefault("gateway.autoMode.recentUsageWeight", 0.15)
+	v.SetDefault("gateway.autoMode.errorWeight", 0.05)
+	v.SetDefault("gateway.autoMode.providerWeightPenaltyWeight", 0.05)
+	v.SetDefault("gateway.autoMode.recentWindowSeconds", 300)
+	v.SetDefault("gateway.autoMode.defaultMaxConcurrency", 20)
+	v.SetDefault("gateway.autoMode.defaultOutputTokens", 1024)
 	v.SetDefault("gateway.supportedProviders", []string{
 		"openai", "anthropic", "google", "azure-openai", "cohere",
 		"mistral-ai", "together-ai", "ollama", "groq", "deepseek",
@@ -193,6 +223,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("security.adminUser", "admin")
 	v.SetDefault("security.adminPass", "admin123")
 	v.SetDefault("security.jwtSecret", "llm-gateway-secret-change-in-production")
+	v.SetDefault("security.encryptionKey", "")
 
 	v.SetDefault("database.driver", "sqlite")
 	v.SetDefault("database.dsn", "llm-gateway.db")

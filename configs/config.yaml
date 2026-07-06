@@ -7,33 +7,19 @@ cache:
         password: ""
         db: 0
 gateway:
-    defaultProvider: openai
+    defaultProvider: ollama
     providers:
-        anthropic:
-            provider: anthropic
-            apiKey: ${ANTHROPIC_API_KEY}
-            customHost: https://api.anthropic.com/v1
-        google:
-            provider: google
-            apiKey: ${GOOGLE_API_KEY}
-            customHost: https://generativelanguage.googleapis.com/v1
-        groq:
-            provider: groq
-            apiKey: ${GROQ_API_KEY}
-            customHost: https://api.groq.com/openai/v1
+        deepseek:
+            provider: deepseek
+            apiKey: admin123
+            weight: 1
+            customHost: https://api.deepseek.com/v1
+            requestTimeout: 30000
         ollama:
             provider: ollama
             apiKey: o1lama
             customHost: http://localhost:11434/v1
-        openai:
-            provider: openai
-            apiKey: ${OPENAI_API_KEY}
-        test-provider-1783153058-1:
-            provider: openai
-            apiKey: sk-test-1783153058-1
-            weight: 2
-            requestTimeout: 30
-    defaultConfig: null
+            requestTimeout: 30000
     guardrailsEnabled: true
     maxRequestTimeout: 120000
     supportedProviders:

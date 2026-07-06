@@ -14,6 +14,7 @@ import (
 	"github.com/warm3snow/llm-gateway/internal/config"
 	"github.com/warm3snow/llm-gateway/internal/metrics"
 	"github.com/warm3snow/llm-gateway/internal/provider"
+	"github.com/warm3snow/llm-gateway/internal/service"
 	"github.com/warm3snow/llm-gateway/internal/types"
 	"github.com/warm3snow/llm-gateway/pkg/cache"
 	"github.com/warm3snow/llm-gateway/pkg/retry"
@@ -25,15 +26,20 @@ type ProxyHandler struct {
 	ProviderFactory *provider.ProviderFactory
 	Retryer         *retry.Retryer
 	Cache           cache.Cache
+	ModelSelector   *service.ModelSelector
+	ModelTracker    *service.ModelConcurrencyTracker
 }
 
 // NewProxyHandler 创建代理处理器
 func NewProxyHandler(cfg *config.Config, c cache.Cache) *ProxyHandler {
+	tracker := service.NewModelConcurrencyTracker()
 	return &ProxyHandler{
 		Config:          cfg,
 		ProviderFactory: provider.NewProviderFactory(),
 		Retryer:         retry.NewRetryer(retry.DefaultRetryConfig()),
 		Cache:           c,
+		ModelSelector:   service.NewModelSelector(cfg, tracker),
+		ModelTracker:    tracker,
 	}
 }
 
@@ -49,6 +55,22 @@ func (h *ProxyHandler) HandleChatCompletion(c *gin.Context) {
 
 	// 获取配置
 	opts := h.getOptionsFromContext(c)
+	finishSelection := func() {}
+	if isAutoModel(req.Model) {
+		if !h.autoModeEnabled() {
+			h.abortWithError(c, http.StatusBadRequest, "invalid_request_error", "auto mode is disabled")
+			return
+		}
+		selection, done, err := h.selectAutoModel(c, &req)
+		if err != nil {
+			h.abortWithError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+			return
+		}
+		opts = &selection.Options
+		req.Model = selection.Model
+		finishSelection = done
+	}
+	defer finishSelection()
 
 	// 创建 provider
 	prov, err := provider.CreateProvider(opts.Provider, opts)
@@ -142,6 +164,54 @@ func (h *ProxyHandler) abortWithError(c *gin.Context, status int, errType, msg s
 	})
 }
 
+func isAutoModel(model string) bool {
+	model = strings.TrimSpace(strings.ToLower(model))
+	return model == "" || model == "auto"
+}
+
+func (h *ProxyHandler) autoModeEnabled() bool {
+	if h == nil || h.Config == nil {
+		return true
+	}
+	autoMode := h.Config.Gateway.AutoMode
+	if autoMode.Enabled {
+		return true
+	}
+	return autoMode.CostWeight == 0 &&
+		autoMode.ConcurrencyWeight == 0 &&
+		autoMode.RecentUsageWeight == 0 &&
+		autoMode.ErrorWeight == 0 &&
+		autoMode.ProviderWeightPenaltyWeight == 0 &&
+		autoMode.RecentWindowSeconds == 0 &&
+		autoMode.DefaultMaxConcurrency == 0 &&
+		autoMode.DefaultOutputTokens == 0
+}
+
+func (h *ProxyHandler) selectAutoModel(c *gin.Context, req *types.ChatCompletionRequest) (*service.Selection, func(), error) {
+	if h.ModelSelector == nil {
+		return nil, nil, fmt.Errorf("auto-mode selector is not configured")
+	}
+	hint := service.SelectionHint{ProviderName: c.GetHeader("x-llm-provider")}
+	if allowed, ok := c.Get("virtual_key_allowed_providers"); ok {
+		if values, ok := allowed.([]string); ok {
+			hint.AllowedProviders = values
+		}
+	}
+	selection, done, err := h.ModelSelector.SelectAndReserve(c.Request.Context(), req, hint)
+	if err != nil {
+		return nil, nil, err
+	}
+	c.Set("selected_provider", selection.ProviderType)
+	c.Set("selected_provider_name", selection.ProviderName)
+	c.Set("selected_provider_type", selection.ProviderType)
+	c.Set("selected_model", selection.Model)
+	c.Header("x-llm-auto-mode", "true")
+	c.Header("x-llm-selected-provider", selection.ProviderName)
+	c.Header("x-llm-selected-provider-type", selection.ProviderType)
+	c.Header("x-llm-selected-model", selection.Model)
+	return selection, done, nil
+}
+
 // HandleModels 处理模型列表请求
 func (h *ProxyHandler) HandleModels(c *gin.Context) {
 	opts := h.getOptionsFromContext(c)
@@ -187,35 +257,35 @@ func (h *ProxyHandler) handleResponse(c *gin.Context, resp *http.Response) {
 
 // getOptionsFromContext 从请求上下文获取选项
 func (h *ProxyHandler) getOptionsFromContext(c *gin.Context) *types.Options {
+	providerName := h.Config.Gateway.DefaultProvider
+	if provider := c.GetHeader("x-llm-provider"); provider != "" {
+		providerName = provider
+	}
+
 	opts := &types.Options{
-		Provider:       h.Config.Gateway.DefaultProvider,
+		Provider:       providerName,
 		RequestTimeout: h.Config.Gateway.MaxRequestTimeout,
 	}
 
-	// 从请求头获取配置
-	if provider := c.GetHeader("x-llm-provider"); provider != "" {
-		opts.Provider = provider
+	// providerName is the configured provider entry name. The stored Options.Provider
+	// is the concrete provider type/factory name (e.g. openai). Use the stored
+	// options as the base so custom hosts, timeouts, Azure/AWS fields, etc. are honored.
+	h.Config.Gateway.ProvidersMu.RLock()
+	providerConfig, ok := h.Config.Gateway.Providers[providerName]
+	h.Config.Gateway.ProvidersMu.RUnlock()
+	if ok {
+		copied := providerConfig
+		opts = &copied
 	}
 
+	if opts.RequestTimeout == 0 {
+		opts.RequestTimeout = h.Config.Gateway.MaxRequestTimeout
+	}
 	if apiKey := c.GetHeader("x-llm-api-key"); apiKey != "" {
 		opts.APIKey = apiKey
 	}
-
 	if virtualKey := c.GetHeader("x-llm-virtual-key"); virtualKey != "" {
 		opts.VirtualKey = virtualKey
-	}
-
-	// 从配置中获取 provider 配置
-	if providerConfig, ok := h.Config.Gateway.Providers[opts.Provider]; ok {
-		// 合并配置
-		if opts.APIKey == "" && providerConfig.APIKey != "" {
-			opts.APIKey = providerConfig.APIKey
-		}
-		if opts.VirtualKey == "" && providerConfig.VirtualKey != "" {
-			opts.VirtualKey = providerConfig.VirtualKey
-		}
-		opts.CustomHost = providerConfig.CustomHost
-		opts.ForwardHeaders = providerConfig.ForwardHeaders
 	}
 
 	return opts
@@ -300,18 +370,35 @@ func (h *ProxyHandler) HandleStreamRequest(c *gin.Context) {
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
 
-	// 获取 provider
-	opts := h.getOptionsFromContext(c)
-	prov, err := provider.CreateProvider(opts.Provider, opts)
-	if err != nil {
-		h.abortWithError(c, http.StatusInternalServerError, "provider_error", fmt.Sprintf("Failed to create provider: %v", err))
-		return
-	}
-
 	// 解析请求
 	var req types.ChatCompletionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		h.abortWithError(c, http.StatusBadRequest, "invalid_request_error", fmt.Sprintf("Invalid request: %v", err))
+		return
+	}
+
+	// 获取 provider
+	opts := h.getOptionsFromContext(c)
+	finishSelection := func() {}
+	if isAutoModel(req.Model) {
+		if !h.autoModeEnabled() {
+			h.abortWithError(c, http.StatusBadRequest, "invalid_request_error", "auto mode is disabled")
+			return
+		}
+		selection, done, err := h.selectAutoModel(c, &req)
+		if err != nil {
+			h.abortWithError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+			return
+		}
+		opts = &selection.Options
+		req.Model = selection.Model
+		finishSelection = done
+	}
+	defer finishSelection()
+
+	prov, err := provider.CreateProvider(opts.Provider, opts)
+	if err != nil {
+		h.abortWithError(c, http.StatusInternalServerError, "provider_error", fmt.Sprintf("Failed to create provider: %v", err))
 		return
 	}
 

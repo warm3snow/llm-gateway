@@ -22,11 +22,11 @@ func NewUsageService() *UsageService {
 
 // GetRecords returns paginated usage records filtered by provider/model/status
 // and a created_at date window.
-func (s *UsageService) GetRecords(provider, model string, statusCode int, startDate, endDate time.Time, limit, offset int) ([]models.UsageRecord, int64, error) {
+func (s *UsageService) GetRecords(tenantID uint, provider, model string, statusCode int, startDate, endDate time.Time, limit, offset int) ([]models.UsageRecord, int64, error) {
 	var records []models.UsageRecord
 	var total int64
 
-	query := s.db.Model(&models.UsageRecord{})
+	query := s.db.Model(&models.UsageRecord{}).Scopes(database.TenantScope(tenantID))
 
 	if provider != "" {
 		query = query.Where("provider = ?", provider)
@@ -64,10 +64,11 @@ func (s *UsageService) GetRecords(provider, model string, statusCode int, startD
 	return records, total, nil
 }
 
-// GetRecordByID returns a single usage record by ID.
-func (s *UsageService) GetRecordByID(id uint) (*models.UsageRecord, error) {
+// GetRecordByID returns a single usage record by ID, scoped to tenantID
+// (0 = any tenant).
+func (s *UsageService) GetRecordByID(tenantID, id uint) (*models.UsageRecord, error) {
 	var record models.UsageRecord
-	if err := s.db.First(&record, id).Error; err != nil {
+	if err := s.db.Scopes(database.TenantScope(tenantID)).First(&record, id).Error; err != nil {
 		return nil, err
 	}
 	return &record, nil

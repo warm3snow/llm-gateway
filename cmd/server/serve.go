@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -13,6 +16,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/cobra"
+	swaggerFiles "github.com/swaggo/files"
+	ginSwagger "github.com/swaggo/gin-swagger"
+	"github.com/warm3snow/llm-gateway/internal/config"
 	"github.com/warm3snow/llm-gateway/internal/database"
 	"github.com/warm3snow/llm-gateway/internal/handler"
 	"github.com/warm3snow/llm-gateway/internal/logging"
@@ -32,10 +38,10 @@ import (
 	_ "github.com/warm3snow/llm-gateway/internal/provider/ollama"
 	_ "github.com/warm3snow/llm-gateway/internal/provider/openai"
 	"github.com/warm3snow/llm-gateway/internal/service"
+	"github.com/warm3snow/llm-gateway/internal/types"
 	"github.com/warm3snow/llm-gateway/pkg/cache"
+	"github.com/warm3snow/llm-gateway/pkg/encryption"
 	"github.com/warm3snow/llm-gateway/pkg/proxy"
-	swaggerFiles "github.com/swaggo/files"
-	ginSwagger "github.com/swaggo/gin-swagger"
 )
 
 // startTime tracks when the server process started, for /health uptime.
@@ -74,7 +80,7 @@ func newServeCmd() *cobra.Command {
 		PreRunE: func(cmd *cobra.Command, args []string) error {
 			return persistentLoad()
 		},
-		RunE: runServe,
+		RunE:         runServe,
 		SilenceUsage: true,
 	}
 	return cmd
@@ -88,8 +94,24 @@ func runServe(cmd *cobra.Command, args []string) error {
 	jsonLogs := cfg.Logging.Format != "text" && cfg.Logging.Format != "console"
 	logging.Init(cfg.Logging.Level, jsonLogs)
 
+	// Initialize the encryption key BEFORE any encrypt/decrypt (provider seeding
+	// below). A deterministic key is required so ciphertext stored in the DB
+	// remains decryptable across restarts. Prefer an explicit 64-hex key; fall
+	// back to a key derived from JWTSecret so single-node dev setups still work.
+	encKey := cfg.Security.EncryptionKey
+	if encKey == "" {
+		sum := sha256.Sum256([]byte(cfg.Security.JWTSecret))
+		encKey = hex.EncodeToString(sum[:])
+		log.Printf("[SECURITY] WARN: security.encryptionKey not set; deriving encryption key from jwtSecret. Set security.encryptionKey (64 hex chars) in production.")
+	}
+	if err := encryption.InitEncryptionKey(encKey); err != nil {
+		return fmt.Errorf("failed to init encryption key: %w", err)
+	}
+
 	// Run auto-migration
 	migrateErr := database.Migrate(
+		&models.Tenant{},
+		&models.User{},
 		&models.VirtualKey{},
 		&models.UsageRecord{},
 		&models.ProviderConfig{},
@@ -101,15 +123,27 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	defer database.Close()
 
+	// Seed the default tenant, backfill legacy rows, and ensure the config
+	// admin exists as a super_admin. Safe to run on every startup.
+	if err := database.Bootstrap(cfg.Security.AdminUser, cfg.Security.AdminPass); err != nil {
+		log.Printf("Warning: Failed to bootstrap tenants/users: %v", err)
+	}
+
+	// Seed providers from config.yaml into the DB (WARN+skip on name conflict),
+	// then reload the full provider set from the DB into cfg.Gateway.Providers.
+	// The DB is the source of truth at runtime; the in-memory map is a cache the
+	// proxy reads live (proxyHandler and adminHandler share this cfg pointer).
+	seedProvidersFromConfig(cfg)
+
 	// Start the asynchronous usage-record writer. Draining happens during
 	// graceful shutdown below so buffered records are flushed before exit.
 	logstore.Init(logstore.Options{})
 
 	// 初始化缓存
 	cacheCfg := &cache.Config{
-		Type:    cfg.Cache.Type,
-		RedisAddr: cfg.Cache.Redis.Addr,
-		RedisPass: cfg.Cache.Redis.Password,
+		Type:       cfg.Cache.Type,
+		RedisAddr:  cfg.Cache.Redis.Addr,
+		RedisPass:  cfg.Cache.Redis.Password,
 		MaxEntries: 1000,
 		DefaultTTL: cfg.Cache.DefaultTTL,
 	}
@@ -200,6 +234,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 	vkHandler := handler.NewVirtualKeyHandler()
 	vkHandler.RegisterRoutesWithAuth(router, jwtMiddleware)
 
+	// 租户管理路由（需要JWT + super_admin）
+	tenantHandler := handler.NewTenantHandler()
+	tenantHandler.RegisterRoutesWithAuth(router, jwtMiddleware)
+
 	// 创建 HTTP 服务器
 	srv := &http.Server{
 		Addr:         fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
@@ -235,6 +273,42 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	log.Println("Server exited")
 	return nil
+}
+
+func seedProvidersFromConfig(cfg *config.Config) {
+	svc := service.NewProviderConfigService()
+
+	for name, opts := range cfg.Gateway.Providers {
+		if _, err := svc.Create(name, opts); err != nil {
+			if errors.Is(err, service.ErrProviderAlreadyExists) {
+				log.Printf("[PROVIDER] WARN: provider %q already exists in DB, skipping config.yaml seed", name)
+				continue
+			}
+			log.Printf("[PROVIDER] WARN: failed to seed provider %q into DB: %v", name, err)
+		} else {
+			log.Printf("[PROVIDER] seeded provider %q from config.yaml into DB", name)
+		}
+	}
+
+	// DB rows win after startup; the proxy reads this map as its runtime cache.
+	rows, err := svc.List()
+	if err != nil {
+		log.Printf("[PROVIDER] WARN: failed to load providers from DB: %v", err)
+		return
+	}
+	m := make(map[string]types.Options, len(rows))
+	for i := range rows {
+		opts, err := svc.ToOptions(&rows[i])
+		if err != nil {
+			log.Printf("[PROVIDER] WARN: failed to decode provider %q from DB: %v", rows[i].Name, err)
+			continue
+		}
+		m[rows[i].Name] = opts
+	}
+	cfg.Gateway.ProvidersMu.Lock()
+	cfg.Gateway.Providers = m
+	cfg.Gateway.ProvidersMu.Unlock()
+	log.Printf("[PROVIDER] loaded %d providers from DB", len(m))
 }
 
 func setupSwagger(router *gin.Engine) {

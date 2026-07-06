@@ -22,12 +22,43 @@ export interface Provider {
 
 export interface VirtualKey {
   id: number;
+  tenant_id?: number;
   name: string;
   key_hash_prefix: string;
   budget_total: number;
   budget_used: number;
+  budget_remaining?: number;
+  rate_limit?: number;
+  rate_limit_window?: number;
+  providers?: string;
   status: string;
   created_at: string;
+  updated_at?: string;
+}
+
+export interface Tenant {
+  id: number;
+  name: string;
+  slug: string;
+  status: string;
+  created_at: string;
+}
+
+export interface TenantUser {
+  id: number;
+  tenant_id?: number;
+  username: string;
+  role: string;
+  status: string;
+  created_at: string;
+}
+
+export interface TenantsResponse {
+  tenants: Tenant[];
+}
+
+export interface TenantUsersResponse {
+  users: TenantUser[];
 }
 
 export interface UsageRecord {

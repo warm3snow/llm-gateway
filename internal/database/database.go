@@ -93,6 +93,18 @@ func GetDB() *gorm.DB {
 	return DB
 }
 
+// TenantScope returns a GORM scope that filters queries to a single tenant.
+// A tenantID of 0 disables filtering (used by super_admin / cross-tenant
+// queries). Apply it via db.Scopes(database.TenantScope(tenantID)).
+func TenantScope(tenantID uint) func(*gorm.DB) *gorm.DB {
+	return func(db *gorm.DB) *gorm.DB {
+		if tenantID == 0 {
+			return db
+		}
+		return db.Where("tenant_id = ?", tenantID)
+	}
+}
+
 // Close closes the database connection
 func Close() error {
 	if DB == nil {

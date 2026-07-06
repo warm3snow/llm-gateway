@@ -7,6 +7,7 @@ import (
 // VirtualKey represents a virtual key in the system
 type VirtualKey struct {
 	ID            uint      `gorm:"primaryKey" json:"id"`
+	TenantID      uint       `gorm:"index;not null;default:1" json:"tenant_id"`
 	Name          string     `gorm:"size:100;not null" json:"name"`
 	KeyHash       string     `gorm:"size:64;uniqueIndex;not null" json:"-"`
 	KeySalt       string     `gorm:"size:32;not null" json:"-"`
@@ -42,6 +43,7 @@ type VirtualKeyRequest struct {
 // VirtualKeyResponse is used for API responses (excludes sensitive fields)
 type VirtualKeyResponse struct {
 	ID              uint      `json:"id"`
+	TenantID        uint       `json:"tenant_id"`
 	Name            string     `json:"name"`
 	Key             string     `json:"key,omitempty"` // Only shown once on creation
 	KeyHashPrefix   string     `json:"key_hash_prefix"` // First 8 chars for identification
