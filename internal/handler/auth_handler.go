@@ -3,6 +3,7 @@ package handler
 import (
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -171,40 +172,54 @@ func (h *AuthHandler) SelectTenant(c *gin.Context) {
 }
 
 func (h *AuthHandler) authenticateUser(c *gin.Context, identifier, password string) (*models.User, bool) {
+	identifier = strings.TrimSpace(identifier)
 	var candidates []models.User
-	err := database.GetDB().
-		Where("status = ? AND (username = ? OR email = ?)", "active", identifier, identifier).
-		Order("id ASC").
-		Find(&candidates).Error
-	if err != nil {
+	query := database.GetDB().Where("status = ?", "active").Order("id ASC")
+	if strings.Contains(identifier, "@") {
+		query = query.Where("email = ?", strings.ToLower(identifier))
+	} else {
+		query = query.Where("username = ?", identifier)
+	}
+
+	if err := query.Find(&candidates).Error; err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, types.ErrorResponse{
 			Message: "Internal error",
 			Type:    "internal_error",
 		})
 		return nil, false
 	}
+	if len(candidates) == 0 {
+		h.invalidCredentials(c)
+		return nil, false
+	}
+	if !strings.Contains(identifier, "@") && len(candidates) > 1 {
+		c.AbortWithStatusJSON(http.StatusConflict, types.ErrorResponse{
+			Message: "Multiple accounts use this username. Please login with email.",
+			Type:    "authentication_error",
+		})
+		return nil, false
+	}
+	if strings.Contains(identifier, "@") && len(candidates) > 1 {
+		c.AbortWithStatusJSON(http.StatusConflict, types.ErrorResponse{
+			Message: "Multiple accounts use this email. Please contact an administrator.",
+			Type:    "authentication_error",
+		})
+		return nil, false
+	}
 
-	matches := make([]models.User, 0, 1)
-	for _, candidate := range candidates {
-		if bcrypt.CompareHashAndPassword([]byte(candidate.PasswordHash), []byte(password)) == nil {
-			matches = append(matches, candidate)
-		}
+	user := candidates[0]
+	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)) != nil {
+		h.invalidCredentials(c)
+		return nil, false
 	}
-	if len(matches) == 1 {
-		return &matches[0], true
-	}
+	return &user, true
+}
 
-	message := "Invalid username or password"
-	status := http.StatusUnauthorized
-	if len(matches) > 1 {
-		message = "Multiple users match these credentials; login with email"
-		status = http.StatusConflict
-	}
-	c.AbortWithStatusJSON(status, types.ErrorResponse{
-		Message: message,
+func (h *AuthHandler) invalidCredentials(c *gin.Context) {
+	c.AbortWithStatusJSON(http.StatusUnauthorized, types.ErrorResponse{
+		Message: "Invalid username or password",
 		Type:    "authentication_error",
 	})
-	return nil, false
 }
 
 func (h *AuthHandler) internalTokenError(c *gin.Context) {

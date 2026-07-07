@@ -130,7 +130,7 @@ func TestLoginSingleTenantReturnsFinalToken(t *testing.T) {
 	}
 }
 
-func TestLoginSameUsernameDifferentPasswordsSelectsMatchedUserTenant(t *testing.T) {
+func TestLoginSameUsernameRequiresEmail(t *testing.T) {
 	router, cfg := setupAuthTestRouter(t)
 	createAuthTestTenant(t, 1, "tenant-one")
 	createAuthTestTenant(t, 2, "tenant-two")
@@ -140,8 +140,13 @@ func TestLoginSameUsernameDifferentPasswordsSelectsMatchedUserTenant(t *testing.
 	createAuthTestMember(t, second.ID, 2, models.RoleTenantUser, "active")
 
 	w := postJSON(t, router, "/api/v1/auth/login", gin.H{"username": "user1", "password": "secret-two"})
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected username conflict, got %d: %s", w.Code, w.Body.String())
+	}
+
+	w = postJSON(t, router, "/api/v1/auth/login", gin.H{"username": second.Email, "password": "secret-two"})
 	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+		t.Fatalf("expected email login success, got %d: %s", w.Code, w.Body.String())
 	}
 	var res struct {
 		Status  string                    `json:"status"`
@@ -153,7 +158,7 @@ func TestLoginSameUsernameDifferentPasswordsSelectsMatchedUserTenant(t *testing.
 		t.Fatalf("decode: %v", err)
 	}
 	if res.Status != "success" || res.Tenant.TenantID != 2 || len(res.Tenants) != 0 {
-		t.Fatalf("expected only matched user's tenant, got %+v", res)
+		t.Fatalf("expected only email account's tenant, got %+v", res)
 	}
 	claims := parseAuthTestClaims(t, res.Token, cfg.Security.JWTSecret)
 	if claims["user_id"].(float64) != float64(second.ID) || claims["tenant_id"].(float64) != 2 {
