@@ -8,6 +8,7 @@ import (
 const (
 	RoleSuperAdmin  = "super_admin"  // platform-level, manages all tenants
 	RoleTenantAdmin = "tenant_admin" // manages a single tenant's resources
+	RoleTenantUser  = "tenant_user"  // read-only user within a tenant
 )
 
 // User represents an admin-console user. A super_admin has TenantID == nil

@@ -12,6 +12,7 @@ import {
   Power,
   TerminalSquare,
   Building2,
+  Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api, currentRole } from "@/lib/api";
@@ -20,17 +21,62 @@ import { useStats } from "@/lib/queries";
 import { useEffect, useState } from "react";
 
 const routes = [
-  { href: "/dashboard", label: "Dashboard", code: "dash", icon: LayoutDashboard },
-  { href: "/providers", label: "Providers", code: "prov", icon: MessagesSquare },
-  { href: "/virtual-keys", label: "Virtual Keys", code: "keys", icon: KeyRound },
-  { href: "/logs", label: "Logs", code: "logs", icon: Activity },
-  { href: "/analytics", label: "Analytics", code: "stat", icon: BarChart3 },
-  { href: "/settings", label: "Settings", code: "conf", icon: Settings },
-];
-
-// Routes visible only to a platform super_admin.
-const superAdminRoutes = [
-  { href: "/tenants", label: "Tenants", code: "tnnt", icon: Building2 },
+  {
+    href: "/dashboard",
+    label: "Dashboard",
+    code: "dash",
+    icon: LayoutDashboard,
+    roles: ["super_admin", "tenant_admin", "tenant_user"],
+  },
+  {
+    href: "/providers",
+    label: "Providers",
+    code: "prov",
+    icon: MessagesSquare,
+    roles: ["super_admin"],
+  },
+  {
+    href: "/virtual-keys",
+    label: "Virtual Keys",
+    code: "keys",
+    icon: KeyRound,
+    roles: ["super_admin", "tenant_admin", "tenant_user"],
+  },
+  {
+    href: "/logs",
+    label: "Logs",
+    code: "logs",
+    icon: Activity,
+    roles: ["super_admin", "tenant_admin", "tenant_user"],
+  },
+  {
+    href: "/analytics",
+    label: "Analytics",
+    code: "stat",
+    icon: BarChart3,
+    roles: ["super_admin", "tenant_admin", "tenant_user"],
+  },
+  {
+    href: "/tenants",
+    label: "Tenants",
+    code: "tnnt",
+    icon: Building2,
+    roles: ["super_admin"],
+  },
+  {
+    href: "/users",
+    label: "Users",
+    code: "user",
+    icon: Users,
+    roles: ["super_admin", "tenant_admin"],
+  },
+  {
+    href: "/settings",
+    label: "Settings",
+    code: "conf",
+    icon: Settings,
+    roles: ["super_admin"],
+  },
 ];
 
 export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
@@ -39,11 +85,11 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
 
   // Role is read client-side from the JWT (UI gating only). Resolve after
   // mount to avoid SSR/hydration mismatch on the cookie read.
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [role, setRole] = useState<string | null>(null);
   useEffect(() => {
-    setIsSuperAdmin(currentRole() === "super_admin");
+    setRole(currentRole());
   }, []);
-  const navRoutes = isSuperAdmin ? [...routes, ...superAdminRoutes] : routes;
+  const navRoutes = routes.filter((route) => role && route.roles.includes(role));
 
   // Live gateway status derived from the stats query — green when the API
   // responds, amber when it errors or is unreachable.

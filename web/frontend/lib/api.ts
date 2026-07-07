@@ -150,23 +150,51 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  getUsers: (tenantId?: number) =>
+    apiFetch<TenantUsersResponse>(
+      `/api/v1/users${tenantId ? `?tenant_id=${tenantId}` : ''}`
+    ),
+  createUser: (data: {
+    username: string;
+    password: string;
+    tenant_id?: number;
+    role: string;
+  }) =>
+    apiFetch<{ user: TenantUser }>('/api/v1/users', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  setUserStatus: (id: number, status: string) =>
+    apiFetch<void>(`/api/v1/users/${id}/status`, {
+      method: 'PUT',
+      body: JSON.stringify({ status }),
+    }),
 };
 
 // currentRole decodes the (unverified) JWT payload to read the user's role.
 // This is UI-only gating; the backend independently enforces authorization.
-export function currentRole(): string | null {
+function currentPayload(): Record<string, unknown> | null {
   const token = getCookie('auth_token');
   if (!token || typeof token !== 'string') return null;
   const parts = token.split('.');
   if (parts.length < 2) return null;
   try {
-    const payload = JSON.parse(
+    return JSON.parse(
       atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'))
-    );
-    return payload.role ?? null;
+    ) as Record<string, unknown>;
   } catch {
     return null;
   }
+}
+
+export function currentRole(): string | null {
+  const role = currentPayload()?.role;
+  return typeof role === 'string' ? role : null;
+}
+
+export function currentTenantId(): number | null {
+  const tenantId = currentPayload()?.tenant_id;
+  return typeof tenantId === 'number' ? tenantId : null;
 }
 
 export const queryClient = new QueryClient({

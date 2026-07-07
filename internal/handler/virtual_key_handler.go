@@ -25,7 +25,7 @@ type VirtualKeyHandler struct {
 func NewVirtualKeyHandler() *VirtualKeyHandler {
 	return &VirtualKeyHandler{
 		service: service.NewVirtualKeyService(),
-		db:     database.GetDB(),
+		db:      database.GetDB(),
 	}
 }
 
@@ -65,6 +65,14 @@ func (h *VirtualKeyHandler) RegisterRoutesWithAuth(router *gin.Engine, jwtMiddle
 // @Security BearerAuth
 // @Router /api/v1/virtual-keys [post]
 func (h *VirtualKeyHandler) Create(c *gin.Context) {
+	if currentRole(c) == models.RoleTenantUser {
+		c.AbortWithStatusJSON(http.StatusForbidden, types.ErrorResponse{
+			Message: "tenant_user cannot create virtual keys",
+			Type:    "authorization_error",
+		})
+		return
+	}
+
 	var req models.VirtualKeyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, types.ErrorResponse{
@@ -173,7 +181,7 @@ func (h *VirtualKeyHandler) Get(c *gin.Context) {
 	resp := h.service.ToResponse(vk, "")
 	c.JSON(http.StatusOK, gin.H{
 		"virtual_key": resp,
-		"status":       "success",
+		"status":      "success",
 	})
 }
 
@@ -194,6 +202,14 @@ func (h *VirtualKeyHandler) Get(c *gin.Context) {
 // @Security BearerAuth
 // @Router /api/v1/virtual-keys/{id} [put]
 func (h *VirtualKeyHandler) Update(c *gin.Context) {
+	if currentRole(c) == models.RoleTenantUser {
+		c.AbortWithStatusJSON(http.StatusForbidden, types.ErrorResponse{
+			Message: "tenant_user cannot update virtual keys",
+			Type:    "authorization_error",
+		})
+		return
+	}
+
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, types.ErrorResponse{
@@ -229,7 +245,7 @@ func (h *VirtualKeyHandler) Update(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"message":     "Virtual key updated successfully",
 		"virtual_key": resp,
-		"status":       "success",
+		"status":      "success",
 	})
 }
 
@@ -249,6 +265,14 @@ func (h *VirtualKeyHandler) Update(c *gin.Context) {
 // @Security BearerAuth
 // @Router /api/v1/virtual-keys/{id} [delete]
 func (h *VirtualKeyHandler) Delete(c *gin.Context) {
+	if currentRole(c) == models.RoleTenantUser {
+		c.AbortWithStatusJSON(http.StatusForbidden, types.ErrorResponse{
+			Message: "tenant_user cannot delete virtual keys",
+			Type:    "authorization_error",
+		})
+		return
+	}
+
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, types.ErrorResponse{
@@ -292,6 +316,14 @@ func (h *VirtualKeyHandler) Delete(c *gin.Context) {
 // @Security BearerAuth
 // @Router /api/v1/virtual-keys/{id}/reset [post]
 func (h *VirtualKeyHandler) Reset(c *gin.Context) {
+	if currentRole(c) == models.RoleTenantUser {
+		c.AbortWithStatusJSON(http.StatusForbidden, types.ErrorResponse{
+			Message: "tenant_user cannot reset virtual keys",
+			Type:    "authorization_error",
+		})
+		return
+	}
+
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, types.ErrorResponse{
@@ -331,6 +363,6 @@ func (h *VirtualKeyHandler) Reset(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"message":     "Virtual key reset successfully",
 		"virtual_key": resp,
-		"status":       "success",
+		"status":      "success",
 	})
 }

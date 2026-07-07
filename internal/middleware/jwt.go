@@ -20,8 +20,8 @@ func JWTAuth(cfg *config.Config) gin.HandlerFunc {
 	}
 
 	return func(c *gin.Context) {
-		// Skip auth for login endpoint
-		if strings.HasSuffix(c.Request.URL.Path, "/auth/login") {
+		// Skip auth for the public login endpoint only.
+		if c.Request.URL.Path == "/api/v1/auth/login" {
 			c.Next()
 			return
 		}

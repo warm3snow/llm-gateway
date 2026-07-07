@@ -238,6 +238,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 	tenantHandler := handler.NewTenantHandler()
 	tenantHandler.RegisterRoutesWithAuth(router, jwtMiddleware)
 
+	// 用户管理路由（需要JWT，按角色授权）
+	userHandler := handler.NewUserHandler()
+	userHandler.RegisterRoutesWithAuth(router, jwtMiddleware)
+
 	// 创建 HTTP 服务器
 	srv := &http.Server{
 		Addr:         fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),

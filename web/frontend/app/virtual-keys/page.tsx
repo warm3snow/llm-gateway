@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   useVirtualKeys,
   useProviders,
@@ -8,6 +8,7 @@ import {
   useUpdateVirtualKey,
   useDeleteVirtualKey,
 } from "@/lib/queries";
+import { currentRole } from "@/lib/api";
 import type { VirtualKey } from "@/lib/types";
 import { PageHeader } from "@/components/ui/page-header";
 import { Panel, PanelHeader, PanelTitle, PanelBody } from "@/components/ui/panel";
@@ -59,6 +60,11 @@ export default function VirtualKeysPage() {
   const [editBudget, setEditBudget] = useState("");
   const [editRateLimit, setEditRateLimit] = useState("0");
   const [editProviderNames, setEditProviderNames] = useState<string[]>([]);
+  const [readOnly, setReadOnly] = useState(false);
+
+  useEffect(() => {
+    setReadOnly(currentRole() === "tenant_user");
+  }, []);
 
   function resetForm() {
     setName("");
@@ -144,6 +150,7 @@ export default function VirtualKeysPage() {
         title="Virtual Keys"
         description="Issued credentials with budget and rate-limit tracking"
         actions={
+          readOnly ? undefined : (
           <Sheet open={open} onOpenChange={setOpen}>
             <SheetTrigger asChild>
               <Button size="sm">
@@ -207,6 +214,7 @@ export default function VirtualKeysPage() {
               </form>
             </SheetContent>
           </Sheet>
+          )
         }
       />
 
@@ -385,15 +393,17 @@ export default function VirtualKeysPage() {
                     })}
                   </span>
                   <div className="flex items-center gap-1">
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      className="text-muted-foreground hover:text-primary"
-                      onClick={() => openEdit(k)}
-                      aria-label="Edit key"
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                    </Button>
+                    {!readOnly && (
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="text-muted-foreground hover:text-primary"
+                        onClick={() => openEdit(k)}
+                        aria-label="Edit key"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
                     <Button
                       variant="ghost"
                       size="icon-sm"
@@ -408,16 +418,18 @@ export default function VirtualKeysPage() {
                     >
                       <Copy className="h-3.5 w-3.5" />
                     </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      className="text-muted-foreground hover:text-destructive hover:border-destructive/40"
-                      onClick={() => handleDelete(k.id, k.name)}
-                      disabled={deleteMut.isPending}
-                      aria-label="Revoke key"
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
+                    {!readOnly && (
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="text-muted-foreground hover:text-destructive hover:border-destructive/40"
+                        onClick={() => handleDelete(k.id, k.name)}
+                        disabled={deleteMut.isPending}
+                        aria-label="Revoke key"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
                   </div>
                 </div>
               </Panel>
