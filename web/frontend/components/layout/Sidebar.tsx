@@ -33,7 +33,7 @@ const routes = [
     label: "Providers",
     code: "prov",
     icon: MessagesSquare,
-    roles: ["super_admin"],
+    roles: ["super_admin", "tenant_admin", "tenant_user"],
   },
   {
     href: "/virtual-keys",

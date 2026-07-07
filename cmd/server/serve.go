@@ -112,6 +112,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	migrateErr := database.Migrate(
 		&models.Tenant{},
 		&models.User{},
+		&models.TenantMember{},
 		&models.VirtualKey{},
 		&models.UsageRecord{},
 		&models.ProviderConfig{},

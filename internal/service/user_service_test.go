@@ -107,3 +107,29 @@ func TestUserServiceSetStatusRules(t *testing.T) {
 		t.Fatal("tenant_user must not update user status")
 	}
 }
+
+func TestUserServiceReusesGlobalUserAcrossTenants(t *testing.T) {
+	setupTenantTestDB(t)
+	seedTenantUserTestData(t)
+	svc := NewUserService()
+
+	first, err := svc.Create(models.RoleSuperAdmin, 0, &models.UserRequest{Username: "user1", Password: "secret", TenantID: 1, Role: models.RoleTenantAdmin})
+	if err != nil {
+		t.Fatalf("create tenant 1 member: %v", err)
+	}
+	second, err := svc.Create(models.RoleSuperAdmin, 0, &models.UserRequest{Username: "user1", Password: "ignored", TenantID: 2, Role: models.RoleTenantUser})
+	if err != nil {
+		t.Fatalf("create tenant 2 member: %v", err)
+	}
+	if first.ID != second.ID {
+		t.Fatalf("expected same global user id across tenants, got %d and %d", first.ID, second.ID)
+	}
+
+	all, err := svc.List(models.RoleSuperAdmin, 0, 0)
+	if err != nil {
+		t.Fatalf("list all: %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("expected two tenant memberships in list, got %+v", all)
+	}
+}

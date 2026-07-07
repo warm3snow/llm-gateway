@@ -50,6 +50,8 @@ export default function LoginPage() {
     try {
       const res = await api.login({ username, password });
       if (res.status === "success" && res.token) {
+        sessionStorage.removeItem("tenant_login_token");
+        sessionStorage.removeItem("tenant_options");
         setCookie("auth_token", res.token, {
           maxAge: 86400,
           path: "/",
@@ -57,6 +59,10 @@ export default function LoginPage() {
           sameSite: "strict",
         });
         router.push("/dashboard");
+      } else if (res.status === "tenant_selection_required") {
+        sessionStorage.setItem("tenant_login_token", res.login_token);
+        sessionStorage.setItem("tenant_options", JSON.stringify(res.tenants));
+        router.push("/select-tenant");
       } else {
         setError("access denied");
       }

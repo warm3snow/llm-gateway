@@ -63,20 +63,47 @@ func JWTAuth(cfg *config.Config) gin.HandlerFunc {
 
 		// Store claims in context
 		if claims, ok := token.Claims.(jwt.MapClaims); ok {
+			if purpose, ok := claims["purpose"].(string); ok && purpose == "select_tenant" {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, types.ErrorResponse{
+					Message: "Invalid token scope",
+					Type:    "authentication_error",
+				})
+				return
+			}
 			if username, ok := claims["username"].(string); ok {
 				c.Set("username", username)
 			}
 			if role, ok := claims["role"].(string); ok {
 				c.Set("role", role)
 			}
-			// JWT numeric claims decode as float64.
-			if tid, ok := claims["tenant_id"].(float64); ok {
-				c.Set("tenant_id", uint(tid))
+			if ok := setUintClaim(c, claims, "tenant_id"); !ok {
+				return
+			}
+			if ok := setUintClaim(c, claims, "user_id"); !ok {
+				return
 			}
 		}
 
 		c.Next()
 	}
+}
+
+func setUintClaim(c *gin.Context, claims jwt.MapClaims, name string) bool {
+	value, exists := claims[name]
+	if !exists {
+		return true
+	}
+	number, ok := value.(float64)
+	maxUint := ^uint(0)
+	if !ok || number < 0 || number > float64(maxUint) || number != float64(uint(number)) {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, types.ErrorResponse{
+			Message: "Invalid " + name + " claim",
+			Type:    "authentication_error",
+		})
+		return false
+	}
+	c.Set(name, uint(number))
+	return true
 }
 
 // IsSuperAdmin reports whether the authenticated user is a platform super_admin.

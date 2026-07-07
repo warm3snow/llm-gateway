@@ -24,25 +24,18 @@ func NewUserService() *UserService {
 // a requested tenant; tenant_admin sees only its own tenant; tenant_user cannot
 // manage users.
 func (s *UserService) List(actorRole string, actorTenantID, requestedTenantID uint) ([]models.User, error) {
-	var users []models.User
-	q := s.db.Order("id ASC")
 	switch actorRole {
 	case models.RoleSuperAdmin:
-		if requestedTenantID != 0 {
-			q = q.Where("tenant_id = ?", requestedTenantID)
-		}
+		return listTenantUsers(s.db, requestedTenantID)
 	case models.RoleTenantAdmin:
-		q = q.Where("tenant_id = ?", actorTenantID)
+		return listTenantUsers(s.db, actorTenantID)
 	default:
 		return nil, errors.New("user management privileges required")
 	}
-	if err := q.Find(&users).Error; err != nil {
-		return nil, err
-	}
-	return users, nil
 }
 
-// Create creates a tenant-bound user according to the caller's privileges.
+// Create creates or reuses a global user and attaches it to a tenant according
+// to the caller's privileges.
 func (s *UserService) Create(actorRole string, actorTenantID uint, req *models.UserRequest) (*models.User, error) {
 	role := req.Role
 	if role == "" {
@@ -67,10 +60,10 @@ func (s *UserService) Create(actorRole string, actorTenantID uint, req *models.U
 		return nil, errors.New("user management privileges required")
 	}
 
-	return s.createTenantUser(tenantID, req.Username, req.Password, role)
+	return createTenantMembershipUser(s.db, tenantID, req.Username, req.Password, role)
 }
 
-// SetStatus enables/disables users according to the caller's privileges.
+// SetStatus enables/disables tenant memberships according to the caller's privileges.
 func (s *UserService) SetStatus(actorRole string, actorTenantID uint, actorUsername string, id uint, status string) error {
 	if status != "active" && status != "disabled" {
 		return errors.New("invalid status")
@@ -92,32 +85,80 @@ func (s *UserService) SetStatus(actorRole string, actorTenantID uint, actorUsern
 		if user.Role == models.RoleSuperAdmin {
 			return errors.New("cannot update super_admin status")
 		}
-	case models.RoleTenantAdmin:
-		if user.TenantID == nil || *user.TenantID != actorTenantID {
+		res := s.db.Model(&models.TenantMember{}).Where("user_id = ?", id).Update("status", status)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
 			return errors.New("user not found")
 		}
-		if user.Role != models.RoleTenantUser {
+		return nil
+	case models.RoleTenantAdmin:
+		var member models.TenantMember
+		if err := s.db.Where("user_id = ? AND tenant_id = ?", id, actorTenantID).First(&member).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New("user not found")
+			}
+			return err
+		}
+		if member.Role != models.RoleTenantUser {
 			return errors.New("tenant_admin can only update tenant_user status")
 		}
+		return s.db.Model(&models.TenantMember{}).Where("id = ?", member.ID).Update("status", status).Error
 	default:
 		return errors.New("user management privileges required")
 	}
-
-	return s.db.Model(&models.User{}).Where("id = ?", id).Update("status", status).Error
 }
 
-func (s *UserService) createTenantUser(tenantID uint, username, password, role string) (*models.User, error) {
+func listTenantUsers(db *gorm.DB, tenantID uint) ([]models.User, error) {
+	var users []models.User
+	q := db.Table("tenant_members").
+		Select("users.id, tenant_members.tenant_id, users.username, users.password_hash, tenant_members.role, tenant_members.status, users.created_at, users.updated_at").
+		Joins("JOIN users ON users.id = tenant_members.user_id").
+		Where("users.status = ?", "active").
+		Order("tenant_members.tenant_id ASC, users.id ASC")
+	if tenantID != 0 {
+		q = q.Where("tenant_members.tenant_id = ?", tenantID)
+	}
+	if err := q.Find(&users).Error; err != nil {
+		return nil, err
+	}
+	return users, nil
+}
+
+func createTenantMembershipUser(db *gorm.DB, tenantID uint, username, password, role string) (*models.User, error) {
 	var tenant models.Tenant
-	if err := s.db.First(&tenant, tenantID).Error; err != nil {
+	if err := db.First(&tenant, tenantID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, errors.New("tenant not found")
 		}
 		return nil, err
 	}
 
+	var user models.User
+	err := db.Where("username = ?", username).Order("id ASC").First(&user).Error
+	if err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+		hash, hashErr := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		if hashErr != nil {
+			return nil, hashErr
+		}
+		user = models.User{
+			Username:     username,
+			PasswordHash: string(hash),
+			Role:         models.RoleTenantUser,
+			Status:       "active",
+		}
+		if err := db.Create(&user).Error; err != nil {
+			return nil, fmt.Errorf("failed to create user: %w", err)
+		}
+	}
+
 	var count int64
-	if err := s.db.Model(&models.User{}).
-		Where("tenant_id = ? AND username = ?", tenantID, username).
+	if err := db.Model(&models.TenantMember{}).
+		Where("tenant_id = ? AND user_id = ?", tenantID, user.ID).
 		Count(&count).Error; err != nil {
 		return nil, err
 	}
@@ -125,20 +166,13 @@ func (s *UserService) createTenantUser(tenantID uint, username, password, role s
 		return nil, fmt.Errorf("username %q already exists in this tenant", username)
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil {
-		return nil, err
+	member := models.TenantMember{TenantID: tenantID, UserID: user.ID, Role: role, Status: "active"}
+	if err := db.Create(&member).Error; err != nil {
+		return nil, fmt.Errorf("failed to create user membership: %w", err)
 	}
 
-	u := &models.User{
-		TenantID:     &tenantID,
-		Username:     username,
-		PasswordHash: string(hash),
-		Role:         role,
-		Status:       "active",
-	}
-	if err := s.db.Create(u).Error; err != nil {
-		return nil, fmt.Errorf("failed to create user: %w", err)
-	}
-	return u, nil
+	user.TenantID = &tenantID
+	user.Role = role
+	user.Status = member.Status
+	return &user, nil
 }

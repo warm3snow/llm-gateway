@@ -6,7 +6,6 @@ import (
 
 	"github.com/warm3snow/llm-gateway/internal/database"
 	"github.com/warm3snow/llm-gateway/internal/models"
-	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
@@ -58,61 +57,19 @@ func (s *TenantService) SetStatus(id uint, status string) error {
 	return nil
 }
 
-// CreateUser creates a tenant_admin user bound to a tenant.
+// CreateUser creates or reuses a global user and attaches it to a tenant.
 func (s *TenantService) CreateUser(req *models.UserRequest) (*models.User, error) {
-	// Ensure the target tenant exists.
-	var tenant models.Tenant
-	if err := s.db.First(&tenant, req.TenantID).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, errors.New("tenant not found")
-		}
-		return nil, err
-	}
-
-	// Enforce username uniqueness within the tenant with a friendly error.
-	var count int64
-	if err := s.db.Model(&models.User{}).
-		Where("tenant_id = ? AND username = ?", req.TenantID, req.Username).
-		Count(&count).Error; err != nil {
-		return nil, err
-	}
-	if count > 0 {
-		return nil, fmt.Errorf("username %q already exists in this tenant", req.Username)
-	}
-
 	role := req.Role
 	if role == "" {
 		role = models.RoleTenantAdmin
 	}
-
-	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
-	if err != nil {
-		return nil, err
+	if role != models.RoleTenantAdmin && role != models.RoleTenantUser {
+		return nil, errors.New("invalid role")
 	}
-
-	tid := req.TenantID
-	u := &models.User{
-		TenantID:     &tid,
-		Username:     req.Username,
-		PasswordHash: string(hash),
-		Role:         role,
-		Status:       "active",
-	}
-	if err := s.db.Create(u).Error; err != nil {
-		return nil, fmt.Errorf("failed to create user: %w", err)
-	}
-	return u, nil
+	return createTenantMembershipUser(s.db, req.TenantID, req.Username, req.Password, role)
 }
 
 // ListUsers returns users, optionally filtered by tenant (0 = all).
 func (s *TenantService) ListUsers(tenantID uint) ([]models.User, error) {
-	var users []models.User
-	q := s.db.Order("id ASC")
-	if tenantID != 0 {
-		q = q.Where("tenant_id = ?", tenantID)
-	}
-	if err := q.Find(&users).Error; err != nil {
-		return nil, err
-	}
-	return users, nil
+	return listTenantUsers(s.db, tenantID)
 }

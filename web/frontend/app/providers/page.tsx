@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   useProviders,
   useCreateProvider,
   useUpdateProvider,
   useDeleteProvider,
 } from "@/lib/queries";
+import { currentRole } from "@/lib/api";
 import type { Provider } from "@/lib/types";
 import { PageHeader } from "@/components/ui/page-header";
 import { Panel, PanelHeader, PanelBody } from "@/components/ui/panel";
@@ -77,6 +78,13 @@ export default function ProvidersPage() {
   const [editCustomHost, setEditCustomHost] = useState("");
   const [editWeight, setEditWeight] = useState("1");
   const [editRequestTimeout, setEditRequestTimeout] = useState("30000");
+  const [role, setRole] = useState<string | null>(null);
+
+  useEffect(() => {
+    setRole(currentRole());
+  }, []);
+
+  const canManageProviders = role === "super_admin";
 
   function resetForm() {
     setName("");
@@ -161,6 +169,7 @@ export default function ProvidersPage() {
         title="Providers"
         description="Upstream LLM backends and their routing configuration"
         actions={
+          canManageProviders ? (
           <Sheet open={open} onOpenChange={setOpen}>
             <SheetTrigger asChild>
               <Button variant="outline" size="sm">
@@ -268,6 +277,7 @@ export default function ProvidersPage() {
               </form>
             </SheetContent>
           </Sheet>
+          ) : undefined
         }
       />
 
@@ -421,25 +431,29 @@ export default function ProvidersPage() {
                 <span>id://{p.provider}</span>
                 <div className="flex items-center gap-2">
                   <span>{p.enabled ? "configured" : "unconfigured"}</span>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    className="text-muted-foreground hover:text-primary"
-                    onClick={() => openEdit(p)}
-                    aria-label={`Edit provider ${p.name}`}
-                  >
-                    <Pencil className="h-3.5 w-3.5" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    className="text-muted-foreground hover:text-destructive hover:border-destructive/40"
-                    onClick={() => handleDelete(p.name)}
-                    disabled={deleteMut.isPending || !p.enabled}
-                    aria-label={`Remove provider ${p.name}`}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
+                  {canManageProviders && (
+                    <>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="text-muted-foreground hover:text-primary"
+                        onClick={() => openEdit(p)}
+                        aria-label={`Edit provider ${p.name}`}
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        className="text-muted-foreground hover:text-destructive hover:border-destructive/40"
+                        onClick={() => handleDelete(p.name)}
+                        disabled={deleteMut.isPending || !p.enabled}
+                        aria-label={`Remove provider ${p.name}`}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </>
+                  )}
                 </div>
               </div>
             </Panel>

@@ -5,6 +5,7 @@ import (
 
 	"github.com/warm3snow/llm-gateway/internal/models"
 	"golang.org/x/crypto/bcrypt"
+	"gorm.io/gorm"
 )
 
 // DefaultTenantID is the tenant that legacy (pre-multi-tenant) resources are
@@ -78,5 +79,61 @@ func Bootstrap(adminUser, adminPass string) error {
 		log.Printf("[BOOTSTRAP] Created super_admin user %q", adminUser)
 	}
 
-	return nil
+	return backfillTenantMembers()
+}
+
+func backfillTenantMembers() error {
+	return DB.Transaction(func(tx *gorm.DB) error {
+		var users []models.User
+		if err := tx.Where("tenant_id IS NOT NULL").Order("id ASC").Find(&users).Error; err != nil {
+			return err
+		}
+
+		canonicalByUsername := make(map[string]models.User)
+		for _, user := range users {
+			if user.TenantID == nil || user.Role == models.RoleSuperAdmin {
+				continue
+			}
+
+			canonical, exists := canonicalByUsername[user.Username]
+			if !exists {
+				canonical = user
+				canonicalByUsername[user.Username] = user
+			}
+
+			role := user.Role
+			if role == "" {
+				role = models.RoleTenantUser
+			}
+			status := user.Status
+			if status == "" {
+				status = "active"
+			}
+
+			member := models.TenantMember{
+				TenantID: *user.TenantID,
+				UserID:   canonical.ID,
+			}
+			if err := tx.Where("tenant_id = ? AND user_id = ?", member.TenantID, member.UserID).
+				Assign(models.TenantMember{Role: role, Status: status}).
+				FirstOrCreate(&member).Error; err != nil {
+				return err
+			}
+
+			if user.ID == canonical.ID {
+				continue
+			}
+
+			if err := tx.Model(&models.VirtualKey{}).
+				Where("created_by_user_id = ?", user.ID).
+				Update("created_by_user_id", canonical.ID).Error; err != nil {
+				return err
+			}
+			if err := tx.Delete(&models.User{}, user.ID).Error; err != nil {
+				return err
+			}
+		}
+
+		return nil
+	})
 }

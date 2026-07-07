@@ -21,6 +21,8 @@ type VirtualKeyHandler struct {
 	db      *gorm.DB
 }
 
+const tenantUserDefaultBudgetTotal = 500
+
 // NewVirtualKeyHandler creates a new VirtualKeyHandler
 func NewVirtualKeyHandler() *VirtualKeyHandler {
 	return &VirtualKeyHandler{
@@ -65,14 +67,6 @@ func (h *VirtualKeyHandler) RegisterRoutesWithAuth(router *gin.Engine, jwtMiddle
 // @Security BearerAuth
 // @Router /api/v1/virtual-keys [post]
 func (h *VirtualKeyHandler) Create(c *gin.Context) {
-	if currentRole(c) == models.RoleTenantUser {
-		c.AbortWithStatusJSON(http.StatusForbidden, types.ErrorResponse{
-			Message: "tenant_user cannot create virtual keys",
-			Type:    "authorization_error",
-		})
-		return
-	}
-
 	var req models.VirtualKeyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.AbortWithStatusJSON(http.StatusBadRequest, types.ErrorResponse{
@@ -90,7 +84,19 @@ func (h *VirtualKeyHandler) Create(c *gin.Context) {
 		tenantID = database.DefaultTenantID
 	}
 
-	fullKey, vk, err := h.service.Create(tenantID, &req)
+	createdByUserID := currentUserID(c)
+	if currentRole(c) == models.RoleTenantUser {
+		if createdByUserID == nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, types.ErrorResponse{
+				Message: "Missing user_id claim",
+				Type:    "authentication_error",
+			})
+			return
+		}
+		req.BudgetTotal = tenantUserDefaultBudgetTotal
+	}
+
+	fullKey, vk, err := h.service.Create(tenantID, &req, createdByUserID, currentUsername(c))
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, types.ErrorResponse{
 			Message: fmt.Sprintf("Failed to create virtual key: %v", err),
@@ -120,7 +126,24 @@ func (h *VirtualKeyHandler) Create(c *gin.Context) {
 // @Security BearerAuth
 // @Router /api/v1/virtual-keys [get]
 func (h *VirtualKeyHandler) List(c *gin.Context) {
-	keys, err := h.service.List(middleware.EffectiveTenantID(c))
+	tenantID := middleware.EffectiveTenantID(c)
+	var (
+		keys []models.VirtualKey
+		err  error
+	)
+	if currentRole(c) == models.RoleTenantUser {
+		userID := currentUserID(c)
+		if userID == nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, types.ErrorResponse{
+				Message: "Missing user_id claim",
+				Type:    "authentication_error",
+			})
+			return
+		}
+		keys, err = h.service.ListByCreator(tenantID, *userID)
+	} else {
+		keys, err = h.service.List(tenantID)
+	}
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, types.ErrorResponse{
 			Message: fmt.Sprintf("Failed to list virtual keys: %v", err),
@@ -165,7 +188,21 @@ func (h *VirtualKeyHandler) Get(c *gin.Context) {
 		return
 	}
 
-	vk, err := h.service.GetByID(middleware.EffectiveTenantID(c), uint(id))
+	tenantID := middleware.EffectiveTenantID(c)
+	var vk *models.VirtualKey
+	if currentRole(c) == models.RoleTenantUser {
+		userID := currentUserID(c)
+		if userID == nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, types.ErrorResponse{
+				Message: "Missing user_id claim",
+				Type:    "authentication_error",
+			})
+			return
+		}
+		vk, err = h.service.GetByIDAndCreator(tenantID, uint(id), *userID)
+	} else {
+		vk, err = h.service.GetByID(tenantID, uint(id))
+	}
 	if err != nil {
 		status := http.StatusInternalServerError
 		if err.Error() == "virtual key not found" {

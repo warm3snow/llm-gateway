@@ -12,8 +12,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  // Login renders full-screen, no chrome.
-  if (pathname === "/login") {
+  // Auth pages render full-screen, no chrome.
+  if (pathname === "/login" || pathname === "/select-tenant") {
     return <>{children}</>;
   }
 

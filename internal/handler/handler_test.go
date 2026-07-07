@@ -241,6 +241,10 @@ func TestAddProvider(t *testing.T) {
 
 	handler := NewHandler(cfg)
 	router := gin.Default()
+	router.Use(func(c *gin.Context) {
+		c.Set("role", "super_admin")
+		c.Next()
+	})
 	handler.RegisterRoutes(router)
 
 	w := httptest.NewRecorder()
@@ -262,6 +266,10 @@ func TestRemoveProvider(t *testing.T) {
 
 	handler := NewHandler(cfg)
 	router := gin.Default()
+	router.Use(func(c *gin.Context) {
+		c.Set("role", "super_admin")
+		c.Next()
+	})
 	handler.RegisterRoutes(router)
 
 	w := httptest.NewRecorder()
@@ -270,4 +278,40 @@ func TestRemoveProvider(t *testing.T) {
 
 	// 由于 Provider 不存在，应该返回错误
 	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestTenantRolesCannotWriteProviders(t *testing.T) {
+	cfg := &config.Config{
+		Server: config.ServerConfig{
+			Host: "localhost",
+			Port: 8080,
+		},
+	}
+
+	for _, role := range []string{"tenant_admin", "tenant_user"} {
+		t.Run(role, func(t *testing.T) {
+			handler := NewHandler(cfg)
+			router := gin.Default()
+			router.Use(func(c *gin.Context) {
+				c.Set("role", role)
+				c.Next()
+			})
+			handler.RegisterRoutes(router)
+
+			for _, tc := range []struct {
+				method string
+				path   string
+			}{
+				{http.MethodPost, "/api/v1/admin/providers"},
+				{http.MethodPut, "/api/v1/admin/providers/openai"},
+				{http.MethodDelete, "/api/v1/admin/providers/openai"},
+			} {
+				w := httptest.NewRecorder()
+				req, _ := http.NewRequest(tc.method, tc.path, strings.NewReader(`{}`))
+				req.Header.Set("Content-Type", "application/json")
+				router.ServeHTTP(w, req)
+				assert.Equal(t, http.StatusForbidden, w.Code)
+			}
+		})
+	}
 }

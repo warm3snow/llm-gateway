@@ -64,6 +64,7 @@ Desktop.ini
 
 # Binaries
 llm-gateway
+/server
 bin/
 
 # Frontend build artifacts

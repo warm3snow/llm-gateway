@@ -282,6 +282,14 @@ func (h *Handler) GetProviders(c *gin.Context) {
 // @Security BearerAuth
 // @Router /api/v1/admin/providers [post]
 func (h *Handler) AddProvider(c *gin.Context) {
+	if !middleware.IsSuperAdmin(c) {
+		c.AbortWithStatusJSON(http.StatusForbidden, types.ErrorResponse{
+			Message: "Only super_admin can create providers",
+			Type:    "authorization_error",
+		})
+		return
+	}
+
 	var req providerRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -335,6 +343,14 @@ func (h *Handler) AddProvider(c *gin.Context) {
 // UpdateProvider updates an existing provider configuration.
 // PUT /api/v1/admin/providers/:name
 func (h *Handler) UpdateProvider(c *gin.Context) {
+	if !middleware.IsSuperAdmin(c) {
+		c.AbortWithStatusJSON(http.StatusForbidden, types.ErrorResponse{
+			Message: "Only super_admin can update providers",
+			Type:    "authorization_error",
+		})
+		return
+	}
+
 	name := c.Param("name")
 	var req providerRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -402,6 +418,14 @@ func (h *Handler) UpdateProvider(c *gin.Context) {
 // @Security BearerAuth
 // @Router /api/v1/admin/providers/{name} [delete]
 func (h *Handler) RemoveProvider(c *gin.Context) {
+	if !middleware.IsSuperAdmin(c) {
+		c.AbortWithStatusJSON(http.StatusForbidden, types.ErrorResponse{
+			Message: "Only super_admin can delete providers",
+			Type:    "authorization_error",
+		})
+		return
+	}
+
 	name := c.Param("name")
 
 	if err := h.providerSvc.Delete(name); err != nil {

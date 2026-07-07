@@ -126,3 +126,15 @@ func currentUsername(c *gin.Context) string {
 	u, _ := username.(string)
 	return u
 }
+
+func currentUserID(c *gin.Context) *uint {
+	userID, exists := c.Get("user_id")
+	if !exists {
+		return nil
+	}
+	id, ok := userID.(uint)
+	if !ok {
+		return nil
+	}
+	return &id
+}

@@ -60,11 +60,15 @@ export default function VirtualKeysPage() {
   const [editBudget, setEditBudget] = useState("");
   const [editRateLimit, setEditRateLimit] = useState("0");
   const [editProviderNames, setEditProviderNames] = useState<string[]>([]);
-  const [readOnly, setReadOnly] = useState(false);
+  const [role, setRole] = useState<string | null>(null);
 
   useEffect(() => {
-    setReadOnly(currentRole() === "tenant_user");
+    setRole(currentRole());
   }, []);
+
+  const canCreateKey = role !== null;
+  const canManageKey = role !== null && role !== "tenant_user";
+  const canSetBudget = role !== null && role !== "tenant_user";
 
   function resetForm() {
     setName("");
@@ -77,7 +81,7 @@ export default function VirtualKeysPage() {
     try {
       await createMut.mutateAsync({
         name: name.trim(),
-        budget_total: parseFloat(budget) || 0,
+        ...(canSetBudget ? { budget_total: parseFloat(budget) || 0 } : {}),
       });
       toast.success("virtual key created", {
         description: name.trim(),
@@ -150,7 +154,7 @@ export default function VirtualKeysPage() {
         title="Virtual Keys"
         description="Issued credentials with budget and rate-limit tracking"
         actions={
-          readOnly ? undefined : (
+          canCreateKey ? (
           <Sheet open={open} onOpenChange={setOpen}>
             <SheetTrigger asChild>
               <Button size="sm">
@@ -182,18 +186,20 @@ export default function VirtualKeysPage() {
                     required
                   />
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="k-budget">budget (usd)</Label>
-                  <Input
-                    id="k-budget"
-                    type="number"
-                    placeholder="100.00"
-                    value={budget}
-                    onChange={(e) => setBudget(e.target.value)}
-                    step="0.01"
-                    min="0"
-                  />
-                </div>
+                {canSetBudget && (
+                  <div className="space-y-2">
+                    <Label htmlFor="k-budget">budget (usd)</Label>
+                    <Input
+                      id="k-budget"
+                      type="number"
+                      placeholder="100.00"
+                      value={budget}
+                      onChange={(e) => setBudget(e.target.value)}
+                      step="0.01"
+                      min="0"
+                    />
+                  </div>
+                )}
                 <SheetFooter className="mt-auto flex-row gap-2 border-t border-border pt-4">
                   <Button
                     type="button"
@@ -214,7 +220,7 @@ export default function VirtualKeysPage() {
               </form>
             </SheetContent>
           </Sheet>
-          )
+          ) : undefined
         }
       />
 
@@ -393,7 +399,7 @@ export default function VirtualKeysPage() {
                     })}
                   </span>
                   <div className="flex items-center gap-1">
-                    {!readOnly && (
+                    {canManageKey && (
                       <Button
                         variant="ghost"
                         size="icon-sm"
@@ -418,7 +424,7 @@ export default function VirtualKeysPage() {
                     >
                       <Copy className="h-3.5 w-3.5" />
                     </Button>
-                    {!readOnly && (
+                    {canManageKey && (
                       <Button
                         variant="ghost"
                         size="icon-sm"

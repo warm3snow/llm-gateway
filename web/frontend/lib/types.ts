@@ -23,6 +23,8 @@ export interface Provider {
 export interface VirtualKey {
   id: number;
   tenant_id?: number;
+  created_by_user_id?: number;
+  created_by_username?: string;
   name: string;
   key_hash_prefix: string;
   budget_total: number;
@@ -131,7 +133,28 @@ export interface UsageResponse {
   total: number;
 }
 
-export interface LoginResponse {
-  token: string;
+export interface TenantMembership {
+  tenant_id: number;
+  name: string;
+  slug: string;
+  role: string;
   status: string;
+}
+
+export type LoginResponse =
+  | {
+      status: 'success';
+      token: string;
+      tenant?: TenantMembership;
+    }
+  | {
+      status: 'tenant_selection_required';
+      login_token: string;
+      tenants: TenantMembership[];
+    };
+
+export interface SelectTenantResponse {
+  status: 'success';
+  token: string;
+  tenant: TenantMembership;
 }

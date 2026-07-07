@@ -27,7 +27,7 @@ func NewVirtualKeyService() *VirtualKeyService {
 
 // Create creates a new virtual key
 // Returns the full key (shown only once) and the DB record
-func (s *VirtualKeyService) Create(tenantID uint, req *models.VirtualKeyRequest) (string, *models.VirtualKey, error) {
+func (s *VirtualKeyService) Create(tenantID uint, req *models.VirtualKeyRequest, createdByUserID *uint, createdByUsername string) (string, *models.VirtualKey, error) {
 	// Generate a random 32-byte key
 	keyBytes := make([]byte, 32)
 	if _, err := rand.Read(keyBytes); err != nil {
@@ -45,16 +45,18 @@ func (s *VirtualKeyService) Create(tenantID uint, req *models.VirtualKeyRequest)
 
 	// Create DB record
 	vk := &models.VirtualKey{
-		TenantID:        tenantID,
-		Name:            req.Name,
-		KeyHash:         keyHash,
-		KeySalt:         salt,
-		HashedKey:       fullKey[:12], // Store first 12 chars (vsk-xxxxxxxx) for identification
-		BudgetTotal:     req.BudgetTotal,
-		BudgetUsed:      0,
-		RateLimit:       req.RateLimit,
-		RateLimitWindow: req.RateLimitWindow,
-		Status:          "active",
+		TenantID:          tenantID,
+		CreatedByUserID:   createdByUserID,
+		CreatedByUsername: createdByUsername,
+		Name:              req.Name,
+		KeyHash:           keyHash,
+		KeySalt:           salt,
+		HashedKey:         fullKey[:12], // Store first 12 chars (vsk-xxxxxxxx) for identification
+		BudgetTotal:       req.BudgetTotal,
+		BudgetUsed:        0,
+		RateLimit:         req.RateLimit,
+		RateLimitWindow:   req.RateLimitWindow,
+		Status:            "active",
 	}
 
 	if vk.RateLimitWindow == 0 {
@@ -132,6 +134,27 @@ func (s *VirtualKeyService) List(tenantID uint) ([]models.VirtualKey, error) {
 	return keys, nil
 }
 
+// ListByCreator returns virtual keys created by a user within a tenant.
+func (s *VirtualKeyService) ListByCreator(tenantID, createdByUserID uint) ([]models.VirtualKey, error) {
+	var keys []models.VirtualKey
+	if err := s.db.Scopes(database.TenantScope(tenantID)).Where("created_by_user_id = ?", createdByUserID).Order("created_at DESC").Find(&keys).Error; err != nil {
+		return nil, err
+	}
+	return keys, nil
+}
+
+// GetByIDAndCreator retrieves a virtual key by ID and creator, scoped to tenantID.
+func (s *VirtualKeyService) GetByIDAndCreator(tenantID, id, createdByUserID uint) (*models.VirtualKey, error) {
+	var vk models.VirtualKey
+	if err := s.db.Scopes(database.TenantScope(tenantID)).Where("created_by_user_id = ?", createdByUserID).First(&vk, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errors.New("virtual key not found")
+		}
+		return nil, err
+	}
+	return &vk, nil
+}
+
 // Update updates a virtual key, scoped to tenantID (0 = any tenant).
 func (s *VirtualKeyService) Update(tenantID, id uint, req *models.VirtualKeyRequest) (*models.VirtualKey, error) {
 	var vk models.VirtualKey
@@ -195,19 +218,22 @@ func (s *VirtualKeyService) TrackUsage(id uint, cost float64) error {
 // ToResponse converts a VirtualKey to VirtualKeyResponse
 func (s *VirtualKeyService) ToResponse(vk *models.VirtualKey, fullKey string) *models.VirtualKeyResponse {
 	resp := &models.VirtualKeyResponse{
-		ID:              vk.ID,
-		TenantID:        vk.TenantID,
-		Name:            vk.Name,
-		KeyHashPrefix:   vk.HashedKey + "...",
-		BudgetTotal:     vk.BudgetTotal,
-		BudgetUsed:      vk.BudgetUsed,
-		BudgetRemaining: vk.BudgetTotal - vk.BudgetUsed,
-		RateLimit:       vk.RateLimit,
-		RateLimitWindow: vk.RateLimitWindow,
-		Providers:       vk.Providers,
-		Status:          vk.Status,
-		CreatedAt:       vk.CreatedAt,
-		UpdatedAt:       vk.UpdatedAt,
+		ID:                vk.ID,
+		TenantID:          vk.TenantID,
+		CreatedByUserID:   vk.CreatedByUserID,
+		CreatedByUsername: vk.CreatedByUsername,
+		Name:              vk.Name,
+		KeyHashPrefix:     vk.HashedKey + "...",
+		BudgetTotal:       vk.BudgetTotal,
+		BudgetUsed:        vk.BudgetUsed,
+		BudgetRemaining:   vk.BudgetTotal - vk.BudgetUsed,
+		BudgetResetAt:     vk.BudgetResetAt,
+		RateLimit:         vk.RateLimit,
+		RateLimitWindow:   vk.RateLimitWindow,
+		Providers:         vk.Providers,
+		Status:            vk.Status,
+		CreatedAt:         vk.CreatedAt,
+		UpdatedAt:         vk.UpdatedAt,
 	}
 
 	if fullKey != "" {

@@ -10,6 +10,7 @@ import type {
   AnalyticsData,
   ServerConfig,
   LoginResponse,
+  SelectTenantResponse,
   TenantsResponse,
   TenantUsersResponse,
   Tenant,
@@ -42,6 +43,11 @@ async function apiFetch<T>(endpoint: string, options: RequestInit = {}): Promise
 export const api = {
   login: (data: { username: string; password: string }) =>
     apiFetch<LoginResponse>('/api/v1/auth/login', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  selectTenant: (data: { login_token: string; tenant_id: number }) =>
+    apiFetch<SelectTenantResponse>('/api/v1/auth/select-tenant', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
@@ -104,7 +110,7 @@ export const api = {
     apiFetch<void>(`/api/v1/admin/providers/${encodeURIComponent(name)}`, {
       method: 'DELETE',
     }),
-  createVirtualKey: (data: { name: string; budget_total: number }) =>
+  createVirtualKey: (data: { name: string; budget_total?: number }) =>
     apiFetch<VirtualKey>('/api/v1/virtual-keys', {
       method: 'POST',
       body: JSON.stringify(data),
