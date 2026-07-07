@@ -27,6 +27,8 @@ export default function LoginPage() {
 
   // Simulated boot sequence — staggered lines for the CRT warmup feel.
   useEffect(() => {
+    sessionStorage.removeItem("tenant_login_token");
+    sessionStorage.removeItem("tenant_options");
     let i = 0;
     const timer = setInterval(() => {
       if (i < bootLines.length) {
@@ -43,6 +45,8 @@ export default function LoginPage() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError("");
+    sessionStorage.removeItem("tenant_login_token");
+    sessionStorage.removeItem("tenant_options");
     if (!username.trim()) return setError("username required");
     if (password.length < 3) return setError("password too short");
 
