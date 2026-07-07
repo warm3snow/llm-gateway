@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { setCookie } from "cookies-next";
 import { Building2, ChevronRight, ShieldCheck } from "lucide-react";
@@ -15,6 +15,9 @@ const emptySelection = {
 };
 
 function readTenantSelection() {
+  if (typeof window === "undefined") {
+    return emptySelection;
+  }
   const token = sessionStorage.getItem("tenant_login_token");
   const rawTenants = sessionStorage.getItem("tenant_options");
   if (!token || !rawTenants) {
@@ -31,17 +34,9 @@ function readTenantSelection() {
   }
 }
 
-function subscribeTenantSelection() {
-  return () => {};
-}
-
 export default function SelectTenantPage() {
   const router = useRouter();
-  const selection = useSyncExternalStore(
-    subscribeTenantSelection,
-    readTenantSelection,
-    () => emptySelection
-  );
+  const [selection] = useState(readTenantSelection);
   const [selected, setSelected] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
