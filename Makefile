@@ -5,7 +5,7 @@ FRONTEND_DIR := $(BASE_DIR)/web/frontend
 BACKEND_PORT := 8080
 FRONTEND_PORT := 3000
 
-.PHONY: all build run dev stop clean test lint fmt
+.PHONY: all build run dev stop clean test lint fmt seed-dev seed-demo traffic-demo demo-data
 
 ## 默认目标
 all: build
@@ -132,6 +132,24 @@ db-reset:
 	@echo "    Database reset complete."
 
 ## ============================================================
+## 数据生成
+## ============================================================
+
+seed-dev:
+	@echo "==> Seeding dev data..."
+	go run ./cmd/seed --profile dev
+
+seed-demo:
+	@echo "==> Seeding demo data..."
+	go run ./cmd/seed --profile demo
+
+traffic-demo:
+	@echo "==> Generating demo traffic..."
+	go run ./cmd/generate-traffic --profile demo --requests $${REQUESTS:-20} --concurrency $${CONCURRENCY:-2}
+
+demo-data: seed-demo traffic-demo
+
+## ============================================================
 ## 安装依赖
 ## ============================================================
 
@@ -176,4 +194,8 @@ help:
 	@echo "    make clean          - 清理构建产物"
 	@echo "    make deps           - 安装所有依赖"
 	@echo "    make db-reset      - 重置数据库"
+	@echo "    make seed-dev       - 生成本地开发 seed 数据"
+	@echo "    make seed-demo      - 生成 demo seed 数据和 manifest"
+	@echo "    make traffic-demo   - 基于 demo manifest 生成真实代理流量"
+	@echo "    make demo-data      - 生成 demo seed 数据并生成流量"
 	@echo ""

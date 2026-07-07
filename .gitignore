@@ -55,6 +55,7 @@ coverage.html
 
 # Temporary files
 /tmp
+/.tmp/
 /temp
 *.tmp
 
