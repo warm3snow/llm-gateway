@@ -294,8 +294,8 @@ export default function UsersPage() {
                     <div className="truncate font-mono text-[13px] text-foreground">
                       {user.username}
                     </div>
-                    <div className="font-mono text-[10px] text-muted-foreground/60">
-                      user #{user.id}
+                    <div className="truncate font-mono text-[10px] text-muted-foreground/60">
+                      {user.email || `user #${user.id}`}
                     </div>
                   </div>
                   <Badge variant={user.role === "tenant_admin" ? "default" : "outline"}>

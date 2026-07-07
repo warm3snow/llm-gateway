@@ -66,7 +66,7 @@ func (s *TenantService) CreateUser(req *models.UserRequest) (*models.User, error
 	if role != models.RoleTenantAdmin && role != models.RoleTenantUser {
 		return nil, errors.New("invalid role")
 	}
-	return createTenantMembershipUser(s.db, req.TenantID, req.Username, req.Password, role)
+	return createTenantMembershipUser(s.db, req.TenantID, req.Username, req.Email, req.Password, role)
 }
 
 // ListUsers returns users, optionally filtered by tenant (0 = all).

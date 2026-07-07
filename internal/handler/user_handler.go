@@ -31,6 +31,7 @@ func (h *UserHandler) RegisterRoutesWithAuth(router *gin.Engine, jwtMiddleware g
 	{
 		grp.GET("", h.List)
 		grp.POST("", h.Create)
+		grp.PUT("/me/password", h.ChangeOwnPassword)
 		grp.PUT("/:id/status", h.SetStatus)
 	}
 }
@@ -77,6 +78,41 @@ func (h *UserHandler) Create(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"user": u, "status": "success"})
+}
+
+// ChangeOwnPassword lets any authenticated user update their own password.
+func (h *UserHandler) ChangeOwnPassword(c *gin.Context) {
+	userID := currentUserID(c)
+	if userID == nil {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, types.ErrorResponse{
+			Message: "Invalid user token",
+			Type:    "authentication_error",
+		})
+		return
+	}
+	var body struct {
+		CurrentPassword string `json:"current_password" binding:"required"`
+		NewPassword     string `json:"new_password" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, types.ErrorResponse{
+			Message: "current_password and new_password are required",
+			Type:    "invalid_request_error",
+		})
+		return
+	}
+	if err := h.service.ChangeOwnPassword(*userID, body.CurrentPassword, body.NewPassword); err != nil {
+		status := http.StatusBadRequest
+		if err.Error() == "user not found" {
+			status = http.StatusNotFound
+		}
+		c.AbortWithStatusJSON(status, types.ErrorResponse{
+			Message: err.Error(),
+			Type:    "user_error",
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Password updated", "status": "success"})
 }
 
 // SetStatus enables/disables a user.

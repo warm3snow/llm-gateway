@@ -69,6 +69,7 @@ func Bootstrap(adminUser, adminPass string) error {
 		admin := models.User{
 			TenantID:     nil, // super_admin is not bound to a tenant
 			Username:     adminUser,
+			Email:        models.DefaultUserEmail(adminUser, "platform"),
 			PasswordHash: string(hash),
 			Role:         models.RoleSuperAdmin,
 			Status:       "active",
@@ -85,20 +86,27 @@ func Bootstrap(adminUser, adminPass string) error {
 func backfillTenantMembers() error {
 	return DB.Transaction(func(tx *gorm.DB) error {
 		var users []models.User
-		if err := tx.Where("tenant_id IS NOT NULL").Order("id ASC").Find(&users).Error; err != nil {
+		if err := tx.Order("id ASC").Find(&users).Error; err != nil {
 			return err
 		}
 
-		canonicalByUsername := make(map[string]models.User)
 		for _, user := range users {
-			if user.TenantID == nil || user.Role == models.RoleSuperAdmin {
-				continue
+			if user.Email == "" {
+				email := models.DefaultUserEmail(user.Username, "platform")
+				if user.TenantID != nil {
+					var tenant models.Tenant
+					if err := tx.First(&tenant, *user.TenantID).Error; err != nil {
+						return err
+					}
+					email = models.DefaultUserEmail(user.Username, tenant.Slug)
+				}
+				if err := tx.Model(&models.User{}).Where("id = ?", user.ID).Update("email", email).Error; err != nil {
+					return err
+				}
 			}
 
-			canonical, exists := canonicalByUsername[user.Username]
-			if !exists {
-				canonical = user
-				canonicalByUsername[user.Username] = user
+			if user.TenantID == nil || user.Role == models.RoleSuperAdmin {
+				continue
 			}
 
 			role := user.Role
@@ -112,24 +120,11 @@ func backfillTenantMembers() error {
 
 			member := models.TenantMember{
 				TenantID: *user.TenantID,
-				UserID:   canonical.ID,
+				UserID:   user.ID,
 			}
 			if err := tx.Where("tenant_id = ? AND user_id = ?", member.TenantID, member.UserID).
 				Assign(models.TenantMember{Role: role, Status: status}).
 				FirstOrCreate(&member).Error; err != nil {
-				return err
-			}
-
-			if user.ID == canonical.ID {
-				continue
-			}
-
-			if err := tx.Model(&models.VirtualKey{}).
-				Where("created_by_user_id = ?", user.ID).
-				Update("created_by_user_id", canonical.ID).Error; err != nil {
-				return err
-			}
-			if err := tx.Delete(&models.User{}, user.ID).Error; err != nil {
 				return err
 			}
 		}

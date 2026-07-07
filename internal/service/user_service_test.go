@@ -5,6 +5,7 @@ import (
 
 	"github.com/warm3snow/llm-gateway/internal/database"
 	"github.com/warm3snow/llm-gateway/internal/models"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func seedTenantUserTestData(t *testing.T) {
@@ -108,7 +109,32 @@ func TestUserServiceSetStatusRules(t *testing.T) {
 	}
 }
 
-func TestUserServiceReusesGlobalUserAcrossTenants(t *testing.T) {
+func TestUserServiceChangeOwnPassword(t *testing.T) {
+	setupTenantTestDB(t)
+	seedTenantUserTestData(t)
+	svc := NewUserService()
+
+	user, err := svc.Create(models.RoleSuperAdmin, 0, &models.UserRequest{Username: "member", Password: "old-secret", TenantID: 1, Role: models.RoleTenantUser})
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := svc.ChangeOwnPassword(user.ID, "wrong-secret", "new-secret"); err == nil {
+		t.Fatal("wrong current password must fail")
+	}
+	if err := svc.ChangeOwnPassword(user.ID, "old-secret", "new-secret"); err != nil {
+		t.Fatalf("change password: %v", err)
+	}
+
+	var updated models.User
+	if err := database.GetDB().First(&updated, user.ID).Error; err != nil {
+		t.Fatalf("load updated user: %v", err)
+	}
+	if bcrypt.CompareHashAndPassword([]byte(updated.PasswordHash), []byte("new-secret")) != nil {
+		t.Fatal("new password hash does not match")
+	}
+}
+
+func TestUserServiceCreatesIndependentUsersForSameUsernameAcrossTenants(t *testing.T) {
 	setupTenantTestDB(t)
 	seedTenantUserTestData(t)
 	svc := NewUserService()
@@ -121,8 +147,11 @@ func TestUserServiceReusesGlobalUserAcrossTenants(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create tenant 2 member: %v", err)
 	}
-	if first.ID != second.ID {
-		t.Fatalf("expected same global user id across tenants, got %d and %d", first.ID, second.ID)
+	if first.ID == second.ID {
+		t.Fatalf("expected separate users across tenants, got same id %d", first.ID)
+	}
+	if first.Email != "user1@default.llmgw" || second.Email != "user1@acme.llmgw" {
+		t.Fatalf("expected tenant-scoped default emails, got %q and %q", first.Email, second.Email)
 	}
 
 	all, err := svc.List(models.RoleSuperAdmin, 0, 0)
@@ -130,6 +159,6 @@ func TestUserServiceReusesGlobalUserAcrossTenants(t *testing.T) {
 		t.Fatalf("list all: %v", err)
 	}
 	if len(all) != 2 {
-		t.Fatalf("expected two tenant memberships in list, got %+v", all)
+		t.Fatalf("expected two tenant users in list, got %+v", all)
 	}
 }

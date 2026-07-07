@@ -165,7 +165,7 @@ export default function LoginPage() {
                     setUsername(e.target.value);
                     setError("");
                   }}
-                  placeholder="admin"
+                  placeholder="admin or admin@platform.llmgw"
                   autoFocus
                   className="font-mono"
                 />

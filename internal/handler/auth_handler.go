@@ -170,32 +170,41 @@ func (h *AuthHandler) SelectTenant(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"token": token, "tenant": membership, "status": "success"})
 }
 
-func (h *AuthHandler) authenticateUser(c *gin.Context, username, password string) (*models.User, bool) {
-	var user models.User
-	err := database.GetDB().Where("username = ?", username).Order("id ASC").First(&user).Error
-	if err != nil || user.Status != "active" {
-		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, types.ErrorResponse{
-				Message: "Internal error",
-				Type:    "internal_error",
-			})
-			return nil, false
-		}
-		c.AbortWithStatusJSON(http.StatusUnauthorized, types.ErrorResponse{
-			Message: "Invalid username or password",
-			Type:    "authentication_error",
+func (h *AuthHandler) authenticateUser(c *gin.Context, identifier, password string) (*models.User, bool) {
+	var candidates []models.User
+	err := database.GetDB().
+		Where("status = ? AND (username = ? OR email = ?)", "active", identifier, identifier).
+		Order("id ASC").
+		Find(&candidates).Error
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, types.ErrorResponse{
+			Message: "Internal error",
+			Type:    "internal_error",
 		})
 		return nil, false
 	}
 
-	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)) != nil {
-		c.AbortWithStatusJSON(http.StatusUnauthorized, types.ErrorResponse{
-			Message: "Invalid username or password",
-			Type:    "authentication_error",
-		})
-		return nil, false
+	matches := make([]models.User, 0, 1)
+	for _, candidate := range candidates {
+		if bcrypt.CompareHashAndPassword([]byte(candidate.PasswordHash), []byte(password)) == nil {
+			matches = append(matches, candidate)
+		}
 	}
-	return &user, true
+	if len(matches) == 1 {
+		return &matches[0], true
+	}
+
+	message := "Invalid username or password"
+	status := http.StatusUnauthorized
+	if len(matches) > 1 {
+		message = "Multiple users match these credentials; login with email"
+		status = http.StatusConflict
+	}
+	c.AbortWithStatusJSON(status, types.ErrorResponse{
+		Message: message,
+		Type:    "authentication_error",
+	})
+	return nil, false
 }
 
 func (h *AuthHandler) internalTokenError(c *gin.Context) {
@@ -235,6 +244,7 @@ func generateToken(u *models.User, membership *models.TenantMembership, secret s
 	claims := jwt.MapClaims{
 		"user_id":  u.ID,
 		"username": u.Username,
+		"email":    u.Email,
 		"role":     role,
 		"exp":      time.Now().Add(24 * time.Hour).Unix(),
 	}
@@ -258,6 +268,7 @@ func generateSelectTenantToken(u *models.User, secret string) (string, error) {
 		"purpose":  selectTenantPurpose,
 		"user_id":  u.ID,
 		"username": u.Username,
+		"email":    u.Email,
 		"exp":      time.Now().Add(10 * time.Minute).Unix(),
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)

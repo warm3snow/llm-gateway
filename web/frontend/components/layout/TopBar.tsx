@@ -2,8 +2,10 @@
 
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { ChevronRight, Sun, Moon, Command, Search } from "lucide-react";
+import { ChevronRight, Sun, Moon, Command, Search, KeyRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -15,6 +17,7 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { api } from "@/lib/api";
 
 const segmentLabels: Record<string, string> = {
@@ -34,6 +37,9 @@ export default function TopBar({
   const pathname = usePathname();
   const { resolvedTheme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [changingPassword, setChangingPassword] = useState(false);
   useEffect(() => setMounted(true), []);
 
   // Build breadcrumb segments
@@ -44,6 +50,30 @@ export default function TopBar({
   }));
 
   const handleLogout = () => api.logout();
+
+  async function handleChangePassword(e: React.FormEvent) {
+    e.preventDefault();
+    if (newPassword.length < 6) {
+      toast.error("new password too short", { description: "Use at least 6 characters." });
+      return;
+    }
+    setChangingPassword(true);
+    try {
+      await api.changeOwnPassword({
+        current_password: currentPassword,
+        new_password: newPassword,
+      });
+      setCurrentPassword("");
+      setNewPassword("");
+      toast.success("password updated");
+    } catch (err) {
+      toast.error("failed to update password", {
+        description: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setChangingPassword(false);
+    }
+  }
 
   return (
     <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-3 border-b border-border bg-background/80 px-4 backdrop-blur-md sm:px-6">
@@ -125,13 +155,56 @@ export default function TopBar({
               </span>
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-44">
+          <DropdownMenuContent align="end" className="w-64">
             <DropdownMenuLabel className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
               session
             </DropdownMenuLabel>
             <DropdownMenuLabel className="font-sans text-sm text-foreground">
               admin
             </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <form
+              className="space-y-2 px-2 py-1.5"
+              onSubmit={handleChangePassword}
+              onKeyDown={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                <KeyRound className="h-3 w-3" />
+                change password
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="current-password" className="text-[10px]">
+                  current
+                </Label>
+                <Input
+                  id="current-password"
+                  type="password"
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                  className="h-8 font-mono text-[12px]"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="new-password" className="text-[10px]">
+                  new
+                </Label>
+                <Input
+                  id="new-password"
+                  type="password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  className="h-8 font-mono text-[12px]"
+                />
+              </div>
+              <Button
+                type="submit"
+                size="sm"
+                className="w-full"
+                disabled={changingPassword || !currentPassword || !newPassword}
+              >
+                {changingPassword ? "updating…" : "update"}
+              </Button>
+            </form>
             <DropdownMenuSeparator />
             <DropdownMenuItem
               className="font-mono text-[12px] text-destructive focus:text-destructive"

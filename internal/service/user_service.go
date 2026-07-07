@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/warm3snow/llm-gateway/internal/database"
 	"github.com/warm3snow/llm-gateway/internal/models"
@@ -60,7 +61,29 @@ func (s *UserService) Create(actorRole string, actorTenantID uint, req *models.U
 		return nil, errors.New("user management privileges required")
 	}
 
-	return createTenantMembershipUser(s.db, tenantID, req.Username, req.Password, role)
+	return createTenantMembershipUser(s.db, tenantID, req.Username, req.Email, req.Password, role)
+}
+
+// ChangeOwnPassword updates the authenticated user's password after verifying the current password.
+func (s *UserService) ChangeOwnPassword(userID uint, currentPassword, newPassword string) error {
+	if len(newPassword) < 6 {
+		return errors.New("new password must be at least 6 characters")
+	}
+	var user models.User
+	if err := s.db.First(&user, userID).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return errors.New("user not found")
+		}
+		return err
+	}
+	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(currentPassword)) != nil {
+		return errors.New("current password is incorrect")
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	return s.db.Model(&models.User{}).Where("id = ?", userID).Update("password_hash", string(hash)).Error
 }
 
 // SetStatus enables/disables tenant memberships according to the caller's privileges.
@@ -113,7 +136,7 @@ func (s *UserService) SetStatus(actorRole string, actorTenantID uint, actorUsern
 func listTenantUsers(db *gorm.DB, tenantID uint) ([]models.User, error) {
 	var users []models.User
 	q := db.Table("tenant_members").
-		Select("users.id, tenant_members.tenant_id, users.username, users.password_hash, tenant_members.role, tenant_members.status, users.created_at, users.updated_at").
+		Select("users.id, tenant_members.tenant_id, users.username, users.email, users.password_hash, tenant_members.role, tenant_members.status, users.created_at, users.updated_at").
 		Joins("JOIN users ON users.id = tenant_members.user_id").
 		Where("users.status = ?", "active").
 		Order("tenant_members.tenant_id ASC, users.id ASC")
@@ -126,7 +149,7 @@ func listTenantUsers(db *gorm.DB, tenantID uint) ([]models.User, error) {
 	return users, nil
 }
 
-func createTenantMembershipUser(db *gorm.DB, tenantID uint, username, password, role string) (*models.User, error) {
+func createTenantMembershipUser(db *gorm.DB, tenantID uint, username, email, password, role string) (*models.User, error) {
 	var tenant models.Tenant
 	if err := db.First(&tenant, tenantID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -135,30 +158,10 @@ func createTenantMembershipUser(db *gorm.DB, tenantID uint, username, password, 
 		return nil, err
 	}
 
-	var user models.User
-	err := db.Where("username = ?", username).Order("id ASC").First(&user).Error
-	if err != nil {
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, err
-		}
-		hash, hashErr := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-		if hashErr != nil {
-			return nil, hashErr
-		}
-		user = models.User{
-			Username:     username,
-			PasswordHash: string(hash),
-			Role:         models.RoleTenantUser,
-			Status:       "active",
-		}
-		if err := db.Create(&user).Error; err != nil {
-			return nil, fmt.Errorf("failed to create user: %w", err)
-		}
-	}
-
 	var count int64
-	if err := db.Model(&models.TenantMember{}).
-		Where("tenant_id = ? AND user_id = ?", tenantID, user.ID).
+	if err := db.Table("tenant_members").
+		Joins("JOIN users ON users.id = tenant_members.user_id").
+		Where("tenant_members.tenant_id = ? AND users.username = ?", tenantID, username).
 		Count(&count).Error; err != nil {
 		return nil, err
 	}
@@ -166,13 +169,38 @@ func createTenantMembershipUser(db *gorm.DB, tenantID uint, username, password, 
 		return nil, fmt.Errorf("username %q already exists in this tenant", username)
 	}
 
+	email = strings.ToLower(strings.TrimSpace(email))
+	if email == "" {
+		email = models.DefaultUserEmail(username, tenant.Slug)
+	}
+	var existingEmailCount int64
+	if err := db.Model(&models.User{}).Where("email = ?", email).Count(&existingEmailCount).Error; err != nil {
+		return nil, err
+	}
+	if existingEmailCount > 0 {
+		return nil, fmt.Errorf("email %q already exists", email)
+	}
+
+	hash, hashErr := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if hashErr != nil {
+		return nil, hashErr
+	}
+	user := models.User{
+		TenantID:     &tenantID,
+		Username:     username,
+		Email:        email,
+		PasswordHash: string(hash),
+		Role:         role,
+		Status:       "active",
+	}
+	if err := db.Create(&user).Error; err != nil {
+		return nil, fmt.Errorf("failed to create user: %w", err)
+	}
+
 	member := models.TenantMember{TenantID: tenantID, UserID: user.ID, Role: role, Status: "active"}
 	if err := db.Create(&member).Error; err != nil {
 		return nil, fmt.Errorf("failed to create user membership: %w", err)
 	}
 
-	user.TenantID = &tenantID
-	user.Role = role
-	user.Status = member.Status
 	return &user, nil
 }

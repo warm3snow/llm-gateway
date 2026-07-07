@@ -51,6 +51,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  changeOwnPassword: (data: { current_password: string; new_password: string }) =>
+    apiFetch<void>('/api/v1/users/me/password', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
   logout: () => {
     deleteCookie('auth_token', { path: '/' });
     if (typeof window !== 'undefined') {
@@ -148,6 +153,7 @@ export const api = {
     ),
   createTenantUser: (data: {
     username: string;
+    email?: string;
     password: string;
     tenant_id: number;
     role?: string;
@@ -162,6 +168,7 @@ export const api = {
     ),
   createUser: (data: {
     username: string;
+    email?: string;
     password: string;
     tenant_id?: number;
     role: string;

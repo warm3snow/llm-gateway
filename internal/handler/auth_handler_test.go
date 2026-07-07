@@ -44,7 +44,7 @@ func createAuthTestUser(t *testing.T, username, password, status string) models.
 	if err != nil {
 		t.Fatalf("hash: %v", err)
 	}
-	user := models.User{Username: username, PasswordHash: string(hash), Role: models.RoleTenantUser, Status: status}
+	user := models.User{Username: username, Email: username + "-" + password + "@test.llmgw", PasswordHash: string(hash), Role: models.RoleTenantUser, Status: status}
 	if err := database.GetDB().Create(&user).Error; err != nil {
 		t.Fatalf("create user: %v", err)
 	}
@@ -126,6 +126,37 @@ func TestLoginSingleTenantReturnsFinalToken(t *testing.T) {
 	}
 	claims := parseAuthTestClaims(t, res.Token, cfg.Security.JWTSecret)
 	if claims["tenant_id"].(float64) != 1 || claims["role"] != models.RoleTenantAdmin || claims["purpose"] != nil {
+		t.Fatalf("unexpected claims: %+v", claims)
+	}
+}
+
+func TestLoginSameUsernameDifferentPasswordsSelectsMatchedUserTenant(t *testing.T) {
+	router, cfg := setupAuthTestRouter(t)
+	createAuthTestTenant(t, 1, "tenant-one")
+	createAuthTestTenant(t, 2, "tenant-two")
+	first := createAuthTestUser(t, "user1", "secret-one", "active")
+	second := createAuthTestUser(t, "user1", "secret-two", "active")
+	createAuthTestMember(t, first.ID, 1, models.RoleTenantAdmin, "active")
+	createAuthTestMember(t, second.ID, 2, models.RoleTenantUser, "active")
+
+	w := postJSON(t, router, "/api/v1/auth/login", gin.H{"username": "user1", "password": "secret-two"})
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var res struct {
+		Status  string                    `json:"status"`
+		Token   string                    `json:"token"`
+		Tenant  models.TenantMembership   `json:"tenant"`
+		Tenants []models.TenantMembership `json:"tenants"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if res.Status != "success" || res.Tenant.TenantID != 2 || len(res.Tenants) != 0 {
+		t.Fatalf("expected only matched user's tenant, got %+v", res)
+	}
+	claims := parseAuthTestClaims(t, res.Token, cfg.Security.JWTSecret)
+	if claims["user_id"].(float64) != float64(second.ID) || claims["tenant_id"].(float64) != 2 {
 		t.Fatalf("unexpected claims: %+v", claims)
 	}
 }

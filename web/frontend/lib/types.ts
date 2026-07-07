@@ -50,6 +50,7 @@ export interface TenantUser {
   id: number;
   tenant_id?: number;
   username: string;
+  email?: string;
   role: string;
   status: string;
   created_at: string;

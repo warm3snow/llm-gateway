@@ -26,7 +26,7 @@ func setupBootstrapTestDB(t *testing.T) {
 	t.Cleanup(func() { _ = Close() })
 }
 
-func TestBootstrapBackfillsTenantMembersAndMergesDuplicateUsers(t *testing.T) {
+func TestBootstrapBackfillsTenantMembersWithoutMergingDuplicateUsers(t *testing.T) {
 	setupBootstrapTestDB(t)
 
 	if err := DB.Create(&models.Tenant{ID: 1, Name: "Tenant One", Slug: "tenant-one", Status: "active"}).Error; err != nil {
@@ -44,10 +44,10 @@ func TestBootstrapBackfillsTenantMembersAndMergesDuplicateUsers(t *testing.T) {
 	tenantTwoID := uint(2)
 	first := models.User{TenantID: &tenantOneID, Username: "user1", PasswordHash: string(hash), Role: models.RoleTenantAdmin, Status: "active"}
 	duplicate := models.User{TenantID: &tenantTwoID, Username: "user1", PasswordHash: string(hash), Role: models.RoleTenantUser, Status: "active"}
-	if err := DB.Create(&first).Error; err != nil {
+	if err := DB.Omit("Email").Create(&first).Error; err != nil {
 		t.Fatalf("create first user: %v", err)
 	}
-	if err := DB.Create(&duplicate).Error; err != nil {
+	if err := DB.Omit("Email").Create(&duplicate).Error; err != nil {
 		t.Fatalf("create duplicate user: %v", err)
 	}
 	if err := DB.Create(&models.VirtualKey{TenantID: 2, CreatedByUserID: &duplicate.ID, CreatedByUsername: "user1", Name: "dup-key", KeyHash: "hash", KeySalt: "salt", HashedKey: "hashed", Status: "active"}).Error; err != nil {
@@ -62,21 +62,24 @@ func TestBootstrapBackfillsTenantMembersAndMergesDuplicateUsers(t *testing.T) {
 	if err := DB.Where("username = ?", "user1").Order("id ASC").Find(&users).Error; err != nil {
 		t.Fatalf("query users: %v", err)
 	}
-	if len(users) != 1 || users[0].ID != first.ID {
-		t.Fatalf("expected duplicate users to merge into first user, got %+v", users)
+	if len(users) != 2 {
+		t.Fatalf("expected duplicate usernames to remain separate users, got %+v", users)
+	}
+	if users[0].Email != "user1@tenant-one.llmgw" || users[1].Email != "user1@tenant-two.llmgw" {
+		t.Fatalf("expected default tenant-scoped emails, got %+v", users)
 	}
 
 	var members []models.TenantMember
-	if err := DB.Where("user_id = ?", first.ID).Order("tenant_id ASC").Find(&members).Error; err != nil {
+	if err := DB.Order("tenant_id ASC").Find(&members).Error; err != nil {
 		t.Fatalf("query members: %v", err)
 	}
 	if len(members) != 2 {
 		t.Fatalf("expected two tenant memberships, got %+v", members)
 	}
-	if members[0].TenantID != 1 || members[0].Role != models.RoleTenantAdmin {
+	if members[0].TenantID != 1 || members[0].UserID != first.ID || members[0].Role != models.RoleTenantAdmin {
 		t.Fatalf("unexpected tenant one membership: %+v", members[0])
 	}
-	if members[1].TenantID != 2 || members[1].Role != models.RoleTenantUser {
+	if members[1].TenantID != 2 || members[1].UserID != duplicate.ID || members[1].Role != models.RoleTenantUser {
 		t.Fatalf("unexpected tenant two membership: %+v", members[1])
 	}
 
@@ -84,7 +87,7 @@ func TestBootstrapBackfillsTenantMembersAndMergesDuplicateUsers(t *testing.T) {
 	if err := DB.Where("name = ?", "dup-key").First(&key).Error; err != nil {
 		t.Fatalf("query virtual key: %v", err)
 	}
-	if key.CreatedByUserID == nil || *key.CreatedByUserID != first.ID {
-		t.Fatalf("expected virtual key creator to point at canonical user, got %+v", key.CreatedByUserID)
+	if key.CreatedByUserID == nil || *key.CreatedByUserID != duplicate.ID {
+		t.Fatalf("expected virtual key creator to keep duplicate user id, got %+v", key.CreatedByUserID)
 	}
 }
