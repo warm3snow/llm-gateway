@@ -201,17 +201,21 @@ func seedTenantsUsersAndKeys(profile string, providerNames []string, manifest *s
 		}
 		manifest.Tenants = append(manifest.Tenants, seedmanifest.ManifestTenant{ID: tenant.ID, Name: tenant.Name, Slug: tenant.Slug})
 
-		admin, err := upsertUser(db, tenant, "admin1", defaultAdminPassword, models.RoleTenantAdmin)
+		adminUsername, userUsername := seedUsernames(i)
+		if err := migrateLegacySeedUsernames(db, tenant, adminUsername, userUsername); err != nil {
+			return err
+		}
+		admin, err := upsertUser(db, tenant, adminUsername, defaultAdminPassword, models.RoleTenantAdmin)
 		if err != nil {
 			return err
 		}
-		user, err := upsertUser(db, tenant, "user1", defaultUserPassword, models.RoleTenantUser)
+		user, err := upsertUser(db, tenant, userUsername, defaultUserPassword, models.RoleTenantUser)
 		if err != nil {
 			return err
 		}
 		manifest.Users = append(manifest.Users,
-			seedmanifest.ManifestUser{ID: admin.ID, TenantID: tenant.ID, Username: admin.Username, Password: defaultAdminPassword, Role: admin.Role},
-			seedmanifest.ManifestUser{ID: user.ID, TenantID: tenant.ID, Username: user.Username, Password: defaultUserPassword, Role: user.Role},
+			seedmanifest.ManifestUser{ID: admin.ID, TenantID: tenant.ID, Username: admin.Username, Email: admin.Email, Password: defaultAdminPassword, Role: admin.Role},
+			seedmanifest.ManifestUser{ID: user.ID, TenantID: tenant.ID, Username: user.Username, Email: user.Email, Password: defaultUserPassword, Role: user.Role},
 		)
 
 		key, vk, err := upsertVirtualKey(db, profile, tenant, admin, providerNames)
@@ -226,6 +230,49 @@ func seedTenantsUsersAndKeys(profile string, providerNames []string, manifest *s
 			Key:       key,
 			Providers: providerNames,
 		})
+	}
+	return nil
+}
+
+func seedUsernames(index int) (string, string) {
+	if index <= 1 {
+		return "admin1", "user1"
+	}
+	return fmt.Sprintf("admin%d", index), fmt.Sprintf("user%d", index)
+}
+
+func migrateLegacySeedUsernames(db *gorm.DB, tenant models.Tenant, adminUsername, userUsername string) error {
+	if adminUsername != "admin1" {
+		if err := renameSeedUser(db, tenant, "admin1", adminUsername, models.RoleTenantAdmin); err != nil {
+			return err
+		}
+	}
+	if userUsername != "user1" {
+		if err := renameSeedUser(db, tenant, "user1", userUsername, models.RoleTenantUser); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func renameSeedUser(db *gorm.DB, tenant models.Tenant, oldUsername, newUsername, role string) error {
+	var target models.User
+	if err := db.Where("tenant_id = ? AND username = ?", tenant.ID, newUsername).First(&target).Error; err == nil {
+		return db.Model(&models.User{}).
+			Where("tenant_id = ? AND username = ? AND role = ? AND email = ?", tenant.ID, oldUsername, role, models.DefaultUserEmail(oldUsername, tenant.Slug)).
+			Update("status", "disabled").Error
+	} else if err != gorm.ErrRecordNotFound {
+		return fmt.Errorf("check seed user %s/%s: %w", tenant.Slug, newUsername, err)
+	}
+
+	updates := map[string]interface{}{
+		"username": newUsername,
+		"email":    models.DefaultUserEmail(newUsername, tenant.Slug),
+	}
+	if err := db.Model(&models.User{}).
+		Where("tenant_id = ? AND username = ? AND role = ? AND email = ?", tenant.ID, oldUsername, role, models.DefaultUserEmail(oldUsername, tenant.Slug)).
+		Updates(updates).Error; err != nil {
+		return fmt.Errorf("rename seed user %s/%s: %w", tenant.Slug, oldUsername, err)
 	}
 	return nil
 }
