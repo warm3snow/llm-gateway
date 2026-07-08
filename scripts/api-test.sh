@@ -38,6 +38,9 @@ TOKEN=""
 declare -a CREATED_VK_IDS=()
 declare -a CREATED_VK_KEYS=()
 declare -a CREATED_PROVIDERS=()
+declare -a CREATED_TENANT_IDS=()
+declare -a CREATED_TENANT_SLUGS=()
+declare -a CREATED_TENANT_USERS=()
 
 # ─── Helper functions ───────────────────────────────────────────────────────
 
@@ -208,13 +211,52 @@ echo ""
 echo "=== 4. Admin / Stats / Logs (JWT) ==="
 assert_status "200" "$(call_status GET /api/v1/admin/config    "" "$TOKEN")" "GET /api/v1/admin/config"
 assert_status "200" "$(call_status GET /api/v1/admin/providers "" "$TOKEN")" "GET /api/v1/admin/providers"
-assert_status "200" "$(call_status GET /api/v1/admin/stats     "" "$TOKEN")" "GET /api/v1/admin/stats"
 assert_status "200" "$(call_status GET /api/v1/admin/health    "" "$TOKEN")" "GET /api/v1/admin/health"
 assert_status "200" "$(call_status GET /api/v1/stats/overview  "" "$TOKEN")" "GET /api/v1/stats/overview"
 assert_status "200" "$(call_status GET /api/v1/stats/analytics "" "$TOKEN")" "GET /api/v1/stats/analytics"
 assert_status "200" "$(call_status GET '/api/v1/stats/hourly?hours=24'  "" "$TOKEN")" "GET /api/v1/stats/hourly"
 assert_status "200" "$(call_status GET '/api/v1/usage?limit=5' "" "$TOKEN")" "GET /api/v1/usage"
 assert_status "200" "$(call_status GET /api/v1/virtual-keys   "" "$TOKEN")" "GET /api/v1/virtual-keys"
+
+# ─── 4b. Generate tenants and tenant users ───────────────────────────────────
+echo ""
+echo "=== 4b. Generate 2 tenants with admin1/user1 ==="
+for i in 1 2; do
+    tenant_name="Test Tenant ${RUN_ID}-${i}"
+    tenant_slug="test-tenant-${RUN_ID}-${i}"
+    tenant_body="{\"name\":\"${tenant_name}\",\"slug\":\"${tenant_slug}\"}"
+    TENANT_RESP=$(call_body POST /api/v1/tenants "$tenant_body" "$TOKEN")
+    TENANT_STATUS=$(jval "$TENANT_RESP" status)
+    if [ "$TENANT_STATUS" = "success" ]; then
+        tenant_id=$(jval "$TENANT_RESP" tenant id)
+        CREATED_TENANT_IDS+=("$tenant_id")
+        CREATED_TENANT_SLUGS+=("$tenant_slug")
+        pass "POST /api/v1/tenants (${tenant_slug})"
+
+        admin_body="{\"username\":\"admin1\",\"password\":\"admin1\",\"tenant_id\":${tenant_id},\"role\":\"tenant_admin\"}"
+        ADMIN_RESP=$(call_body POST /api/v1/tenants/users "$admin_body" "$TOKEN")
+        ADMIN_STATUS=$(jval "$ADMIN_RESP" status)
+        if [ "$ADMIN_STATUS" = "success" ]; then
+            CREATED_TENANT_USERS+=("${tenant_slug}:admin1")
+            pass "POST /api/v1/tenants/users (${tenant_slug}/admin1)"
+        else
+            fail "POST /api/v1/tenants/users (${tenant_slug}/admin1)" "resp: $ADMIN_RESP"
+        fi
+
+        user_body="{\"username\":\"user1\",\"password\":\"user1\",\"tenant_id\":${tenant_id},\"role\":\"tenant_user\"}"
+        USER_RESP=$(call_body POST /api/v1/tenants/users "$user_body" "$TOKEN")
+        USER_STATUS=$(jval "$USER_RESP" status)
+        if [ "$USER_STATUS" = "success" ]; then
+            CREATED_TENANT_USERS+=("${tenant_slug}:user1")
+            pass "POST /api/v1/tenants/users (${tenant_slug}/user1)"
+        else
+            fail "POST /api/v1/tenants/users (${tenant_slug}/user1)" "resp: $USER_RESP"
+        fi
+    else
+        fail "POST /api/v1/tenants (${tenant_slug})" "resp: $TENANT_RESP"
+    fi
+done
+note "Created ${#CREATED_TENANT_IDS[@]}/2 tenants and ${#CREATED_TENANT_USERS[@]}/4 tenant users"
 
 # ─── 5. Generate provider configs ────────────────────────────────────────────
 echo ""
@@ -342,7 +384,7 @@ if [ "${#CREATED_VK_KEYS[@]}" -gt 0 ]; then
         C=$(call_status POST /v1/completions \
             "{\"model\":\"${CHAT_MODEL}\",\"prompt\":\"Hello\",\"max_tokens\":5}" \
             "" "$PK")
-        assert_optional_200 "$C" "POST /v1/completions" "some providers/models expose chat but not legacy completions"
+        assert_optional_200 "$C" "POST /v1/completions" "some providers/models expose chat but not text completions"
     fi
 
     echo "  8.5 POST /v1/embeddings"
@@ -444,6 +486,8 @@ fi
 echo ""
 echo "========================================="
 echo -e "  Data generated (kept, NOT cleaned up):"
+echo -e "    tenants      : ${GREEN}${#CREATED_TENANT_IDS[@]}${NC}"
+echo -e "    tenant users : ${GREEN}${#CREATED_TENANT_USERS[@]}${NC} (admin1/admin1 and user1/user1 per tenant)"
 echo -e "    virtual keys : ${GREEN}$(( ${#CREATED_VK_IDS[@]} > 0 ? ${#CREATED_VK_IDS[@]} - 1 : 0 ))${NC} (1 deleted for DELETE test)"
 echo -e "    providers    : ${GREEN}$(( ${#CREATED_PROVIDERS[@]} > 0 ? ${#CREATED_PROVIDERS[@]} - 1 : 0 ))${NC} (1 deleted for DELETE test)"
 echo "-----------------------------------------"

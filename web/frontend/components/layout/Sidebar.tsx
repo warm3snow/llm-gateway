@@ -16,9 +16,8 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api, currentRole } from "@/lib/api";
-import { useRouter } from "next/navigation";
 import { useStats } from "@/lib/queries";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 const routes = [
   {
@@ -81,14 +80,9 @@ const routes = [
 
 export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
-  const router = useRouter();
 
-  // Role is read client-side from the JWT (UI gating only). Resolve after
-  // mount to avoid SSR/hydration mismatch on the cookie read.
-  const [role, setRole] = useState<string | null>(null);
-  useEffect(() => {
-    setRole(currentRole());
-  }, []);
+  // Role is read client-side from the JWT (UI gating only).
+  const [role] = useState<string | null>(() => currentRole());
   const navRoutes = routes.filter((route) => role && route.roles.includes(role));
 
   // Live gateway status derived from the stats query — green when the API
@@ -136,7 +130,7 @@ export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       {/* Section label */}
       <div className="px-4 pt-4 pb-2">
         <span className="font-mono text-[9px] uppercase tracking-[0.22em] text-muted-foreground/70">
-          // modules
+          {"// modules"}
         </span>
       </div>
 

@@ -57,6 +57,7 @@ func CacheMiddleware(c cache.Cache) gin.HandlerFunc {
 		if err == nil && cached != nil {
 			ctx.Header("x-cache", "HIT")
 			ctx.Data(http.StatusOK, "application/json", []byte(cached.ResponseText))
+			ctx.Abort()
 			return
 		}
 
@@ -70,12 +71,12 @@ func CacheMiddleware(c cache.Cache) gin.HandlerFunc {
 		// Cache the response if status is 200
 		if ctx.Writer.Status() == http.StatusOK && writer.body.Len() > 0 {
 			entry := &cache.CacheEntry{
-				Key:         cacheKey,
-				RequestText: string(bodyBytes),
+				Key:          cacheKey,
+				RequestText:  string(bodyBytes),
 				ResponseText: writer.body.String(),
-				Provider:    provider,
-				Model:       model,
-				ExpiresAt:   time.Now().Add(5 * time.Minute),
+				Provider:     provider,
+				Model:        model,
+				ExpiresAt:    time.Now().Add(5 * time.Minute),
 			}
 			_ = c.Set(ctx.Request.Context(), cacheKey, entry, 5*time.Minute)
 		}

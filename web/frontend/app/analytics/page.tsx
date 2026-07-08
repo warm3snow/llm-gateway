@@ -22,6 +22,9 @@ import {
   YAxis,
 } from "recharts";
 import { cn } from "@/lib/utils";
+import { useState } from "react";
+import { currentRole } from "@/lib/api";
+import { roleScopeLabel } from "@/components/auth/RoleGate";
 
 const palette = [
   "hsl(var(--primary))",
@@ -33,6 +36,8 @@ const palette = [
 ];
 
 export default function AnalyticsPage() {
+  const [role] = useState<string | null>(() => currentRole());
+
   const { data: stats, isLoading } = useAnalytics();
 
   const series = stats?.timeSeries ?? [];
@@ -51,7 +56,7 @@ export default function AnalyticsPage() {
       <PageHeader
         code="05 / analysis"
         title="Analytics"
-        description="Aggregate trends across the gateway"
+        description={`Aggregate trends across the gateway · ${roleScopeLabel(role)}`}
       />
 
       {isLoading ? (

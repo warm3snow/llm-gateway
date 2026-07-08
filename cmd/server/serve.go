@@ -124,8 +124,8 @@ func runServe(cmd *cobra.Command, args []string) error {
 	}
 	defer database.Close()
 
-	// Seed the default tenant, backfill legacy rows, and ensure the config
-	// admin exists as a super_admin. Safe to run on every startup.
+	// Seed the default tenant and ensure the config admin exists as a
+	// super_admin. Safe to run on every startup.
 	if err := database.Bootstrap(cfg.Security.AdminUser, cfg.Security.AdminPass); err != nil {
 		log.Printf("Warning: Failed to bootstrap tenants/users: %v", err)
 	}

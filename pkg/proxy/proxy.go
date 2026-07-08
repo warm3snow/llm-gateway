@@ -35,7 +35,7 @@ func NewProxyHandler(cfg *config.Config, c cache.Cache) *ProxyHandler {
 	tracker := service.NewModelConcurrencyTracker()
 	return &ProxyHandler{
 		Config:          cfg,
-		ProviderFactory: provider.NewProviderFactory(),
+		ProviderFactory: provider.GetGlobalFactory(),
 		Retryer:         retry.NewRetryer(retry.DefaultRetryConfig()),
 		Cache:           c,
 		ModelSelector:   service.NewModelSelector(cfg, tracker),
@@ -73,7 +73,7 @@ func (h *ProxyHandler) HandleChatCompletion(c *gin.Context) {
 	defer finishSelection()
 
 	// 创建 provider
-	prov, err := provider.CreateProvider(opts.Provider, opts)
+	prov, err := h.ProviderFactory.Create(opts.Provider, opts)
 	if err != nil {
 		h.abortWithError(c, http.StatusInternalServerError, "provider_error", fmt.Sprintf("Failed to create provider: %v", err))
 		return
@@ -113,7 +113,7 @@ func (h *ProxyHandler) HandleCompletion(c *gin.Context) {
 	}
 
 	opts := h.getOptionsFromContext(c)
-	prov, err := provider.CreateProvider(opts.Provider, opts)
+	prov, err := h.ProviderFactory.Create(opts.Provider, opts)
 	if err != nil {
 		h.abortWithError(c, http.StatusInternalServerError, "provider_error", fmt.Sprintf("Failed to create provider: %v", err))
 		return
@@ -140,7 +140,7 @@ func (h *ProxyHandler) HandleEmbedding(c *gin.Context) {
 	}
 
 	opts := h.getOptionsFromContext(c)
-	prov, err := provider.CreateProvider(opts.Provider, opts)
+	prov, err := h.ProviderFactory.Create(opts.Provider, opts)
 	if err != nil {
 		h.abortWithError(c, http.StatusInternalServerError, "provider_error", fmt.Sprintf("Failed to create provider: %v", err))
 		return
@@ -215,7 +215,7 @@ func (h *ProxyHandler) selectAutoModel(c *gin.Context, req *types.ChatCompletion
 // HandleModels 处理模型列表请求
 func (h *ProxyHandler) HandleModels(c *gin.Context) {
 	opts := h.getOptionsFromContext(c)
-	prov, err := provider.CreateProvider(opts.Provider, opts)
+	prov, err := h.ProviderFactory.Create(opts.Provider, opts)
 	if err != nil {
 		h.abortWithError(c, http.StatusInternalServerError, "provider_error", fmt.Sprintf("Failed to create provider: %v", err))
 		return
@@ -348,7 +348,7 @@ func (h *ProxyHandler) getTargetURL(c *gin.Context) string {
 	}
 
 	// 根据 provider 构建 URL
-	prov, err := provider.CreateProvider(opts.Provider, opts)
+	prov, err := h.ProviderFactory.Create(opts.Provider, opts)
 	if err != nil {
 		return ""
 	}
@@ -396,7 +396,7 @@ func (h *ProxyHandler) HandleStreamRequest(c *gin.Context) {
 	}
 	defer finishSelection()
 
-	prov, err := provider.CreateProvider(opts.Provider, opts)
+	prov, err := h.ProviderFactory.Create(opts.Provider, opts)
 	if err != nil {
 		h.abortWithError(c, http.StatusInternalServerError, "provider_error", fmt.Sprintf("Failed to create provider: %v", err))
 		return
@@ -664,7 +664,7 @@ func (h *ProxyHandler) HandleImageGeneration(c *gin.Context) {
 	}
 
 	opts := h.getOptionsFromContext(c)
-	prov, err := provider.CreateProvider(opts.Provider, opts)
+	prov, err := h.ProviderFactory.Create(opts.Provider, opts)
 	if err != nil {
 		h.abortWithError(c, http.StatusInternalServerError, "provider_error", fmt.Sprintf("Failed to create provider: %v", err))
 		return
@@ -689,7 +689,7 @@ func (h *ProxyHandler) HandleAudioSpeech(c *gin.Context) {
 	}
 
 	opts := h.getOptionsFromContext(c)
-	prov, err := provider.CreateProvider(opts.Provider, opts)
+	prov, err := h.ProviderFactory.Create(opts.Provider, opts)
 	if err != nil {
 		h.abortWithError(c, http.StatusInternalServerError, "provider_error", fmt.Sprintf("Failed to create provider: %v", err))
 		return

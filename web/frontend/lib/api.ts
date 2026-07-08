@@ -82,8 +82,14 @@ export const api = {
       window.location.href = '/login';
     }
   },
-  getStats: () => apiFetch<DashboardStats>('/api/v1/stats/overview'),
-  getAnalytics: () => apiFetch<AnalyticsData>('/api/v1/stats/analytics'),
+  getStats: (params?: { tenant_id?: number }) => {
+    const qs = params?.tenant_id ? `?tenant_id=${params.tenant_id}` : '';
+    return apiFetch<DashboardStats>(`/api/v1/stats/overview${qs}`);
+  },
+  getAnalytics: (params?: { tenant_id?: number }) => {
+    const qs = params?.tenant_id ? `?tenant_id=${params.tenant_id}` : '';
+    return apiFetch<AnalyticsData>(`/api/v1/stats/analytics${qs}`);
+  },
   getProviders: () => apiFetch<ProvidersResponse>('/api/v1/admin/providers'),
   getVirtualKeys: () => apiFetch<VirtualKeysResponse>('/api/v1/virtual-keys'),
   getUsage: (params?: {
@@ -92,6 +98,9 @@ export const api = {
     provider?: string;
     model?: string;
     status_code?: number;
+    tenant_id?: number;
+    start_date?: string;
+    end_date?: string;
   }) => {
     const qs = params
       ? new URLSearchParams(

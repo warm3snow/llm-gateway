@@ -42,8 +42,8 @@ type summary struct {
 }
 
 // computeSummary runs the aggregate queries over usage records that back both
-// GetOverview and GetAnalytics, scoped to tenantID (0 = all tenants).
-func (s *StatsService) computeSummary(tenantID uint) summary {
+// GetOverview and GetAnalytics, scoped to the caller.
+func (s *StatsService) computeSummary(scope AccessScope) summary {
 	var sum summary
 
 	// Guard against an uninitialized DB (e.g. in unit tests that don't spin up
@@ -52,12 +52,14 @@ func (s *StatsService) computeSummary(tenantID uint) summary {
 		return sum
 	}
 
-	scope := database.TenantScope(tenantID)
+	usageQuery := func() *gorm.DB {
+		return scope.ApplyUsage(s.db.Model(&models.UsageRecord{}))
+	}
 
-	s.db.Model(&models.UsageRecord{}).Scopes(scope).Count(&sum.TotalRequests)
+	usageQuery().Count(&sum.TotalRequests)
 
 	var successCount int64
-	s.db.Model(&models.UsageRecord{}).Scopes(scope).Where("status_code >= 200 AND status_code < 300").Count(&successCount)
+	usageQuery().Where("status_code >= 200 AND status_code < 300").Count(&successCount)
 	if sum.TotalRequests > 0 {
 		sum.SuccessRate = float64(successCount) / float64(sum.TotalRequests) * 100
 	}
@@ -66,23 +68,23 @@ func (s *StatsService) computeSummary(tenantID uint) summary {
 		TotalInput  int64 `gorm:"column:total_input_tokens"`
 		TotalOutput int64 `gorm:"column:total_output_tokens"`
 	}
-	s.db.Model(&models.UsageRecord{}).Scopes(scope).Select("SUM(input_tokens) as total_input_tokens, SUM(output_tokens) as total_output_tokens").Scan(&tokens)
+	usageQuery().Select("SUM(input_tokens) as total_input_tokens, SUM(output_tokens) as total_output_tokens").Scan(&tokens)
 	sum.TotalTokens = tokens.TotalInput + tokens.TotalOutput
 
-	s.db.Model(&models.UsageRecord{}).Scopes(scope).Select("COALESCE(SUM(cost), 0)").Scan(&sum.TotalCost)
+	usageQuery().Select("COALESCE(SUM(cost), 0)").Scan(&sum.TotalCost)
 
 	var providerCount int64
-	s.db.Model(&models.UsageRecord{}).Scopes(scope).Distinct("provider").Count(&providerCount)
+	usageQuery().Distinct("provider").Count(&providerCount)
 	sum.ActiveProviders = int(providerCount)
 
-	s.db.Model(&models.VirtualKey{}).Scopes(scope).Where("status = ?", "active").Count(&sum.ActiveVirtualKeys)
+	scope.ApplyVirtualKeys(s.db.Model(&models.VirtualKey{})).Where("status = ?", "active").Count(&sum.ActiveVirtualKeys)
 
 	return sum
 }
 
-// GetOverview returns stats for the dashboard, scoped to tenantID (0 = all).
-func (s *StatsService) GetOverview(tenantID uint) (*OverviewStats, error) {
-	sum := s.computeSummary(tenantID)
+// GetOverview returns stats for the dashboard, scoped to the caller.
+func (s *StatsService) GetOverview(scope AccessScope) (*OverviewStats, error) {
+	sum := s.computeSummary(scope)
 	return &OverviewStats{
 		TotalRequests:     sum.TotalRequests,
 		TotalTokens:       sum.TotalTokens,
@@ -126,9 +128,9 @@ type AnalyticsData struct {
 	MaxCount          int64             `json:"maxCount"`
 }
 
-// GetAnalytics returns combined analytics data, scoped to tenantID (0 = all).
-func (s *StatsService) GetAnalytics(tenantID uint) (*AnalyticsData, error) {
-	sum := s.computeSummary(tenantID)
+// GetAnalytics returns combined analytics data, scoped to the caller.
+func (s *StatsService) GetAnalytics(scope AccessScope) (*AnalyticsData, error) {
+	sum := s.computeSummary(scope)
 	data := &AnalyticsData{
 		TotalRequests:     sum.TotalRequests,
 		TotalTokens:       sum.TotalTokens,
@@ -145,7 +147,9 @@ func (s *StatsService) GetAnalytics(tenantID uint) (*AnalyticsData, error) {
 		return data, nil
 	}
 
-	scope := database.TenantScope(tenantID)
+	usageQuery := func() *gorm.DB {
+		return scope.ApplyUsage(s.db.Model(&models.UsageRecord{}))
+	}
 
 	// Time series (last 7 days)
 	end := time.Now()
@@ -156,7 +160,7 @@ func (s *StatsService) GetAnalytics(tenantID uint) (*AnalyticsData, error) {
 		Count     int64   `json:"count"`
 		Cost      float64 `json:"cost"`
 	}
-	s.db.Model(&models.UsageRecord{}).Scopes(scope).
+	usageQuery().
 		Select("DATE(created_at) as timestamp, COUNT(*) as count, COALESCE(SUM(cost), 0) as cost").
 		Where("created_at >= ? AND created_at <= ?", start, end).
 		Group("DATE(created_at)").
@@ -179,7 +183,7 @@ func (s *StatsService) GetAnalytics(tenantID uint) (*AnalyticsData, error) {
 		Model string `json:"model"`
 		Count int64  `json:"count"`
 	}
-	s.db.Model(&models.UsageRecord{}).Scopes(scope).
+	usageQuery().
 		Select("model, COUNT(*) as count").
 		Where("model != ''").
 		Group("model").
@@ -195,7 +199,7 @@ func (s *StatsService) GetAnalytics(tenantID uint) (*AnalyticsData, error) {
 		Provider string `json:"provider"`
 		Count    int64  `json:"count"`
 	}
-	s.db.Model(&models.UsageRecord{}).Scopes(scope).
+	usageQuery().
 		Select("provider, COUNT(*) as count").
 		Group("provider").
 		Order("count DESC").
@@ -221,13 +225,13 @@ func (s *StatsService) hourGroupExpr() string {
 
 // GetHourlyTimeSeries returns invocation counts and cost bucketed by hour over
 // [start, end], for finer-grained dashboards and alerting.
-func (s *StatsService) GetHourlyTimeSeries(tenantID uint, start, end time.Time) ([]TimeSeriesPoint, error) {
-	return s.timeSeries(tenantID, s.hourGroupExpr(), start, end)
+func (s *StatsService) GetHourlyTimeSeries(scope AccessScope, start, end time.Time) ([]TimeSeriesPoint, error) {
+	return s.timeSeries(scope, s.hourGroupExpr(), start, end)
 }
 
 // timeSeries returns invocation counts and cost grouped by groupExpr over the
-// optional [start, end] window, scoped to tenantID (0 = all tenants).
-func (s *StatsService) timeSeries(tenantID uint, groupExpr string, start, end time.Time) ([]TimeSeriesPoint, error) {
+// optional [start, end] window, scoped to the caller.
+func (s *StatsService) timeSeries(scope AccessScope, groupExpr string, start, end time.Time) ([]TimeSeriesPoint, error) {
 	points := []TimeSeriesPoint{}
 	if s.db == nil {
 		return points, nil
@@ -239,7 +243,7 @@ func (s *StatsService) timeSeries(tenantID uint, groupExpr string, start, end ti
 		Cost      float64 `gorm:"column:cost"`
 	}
 
-	query := s.db.Model(&models.UsageRecord{}).Scopes(database.TenantScope(tenantID)).
+	query := scope.ApplyUsage(s.db.Model(&models.UsageRecord{})).
 		Select(groupExpr + " as timestamp, COUNT(*) as count, COALESCE(SUM(cost), 0) as cost").
 		Group(groupExpr).
 		Order("timestamp ASC")

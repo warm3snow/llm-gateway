@@ -28,7 +28,7 @@ export function PageHeader({
       <div className="space-y-1">
         {code && (
           <div className="font-mono text-[10px] uppercase tracking-[0.22em] text-primary/80 glow-amber">
-            // {code}
+            {`// ${code}`}
           </div>
         )}
         <h1 className="font-display text-2xl font-medium tracking-tight text-foreground sm:text-3xl">

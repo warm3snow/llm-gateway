@@ -21,6 +21,7 @@ import {
   SheetTrigger,
   SheetFooter,
 } from "@/components/ui/sheet";
+import { RoleGate } from "@/components/auth/RoleGate";
 import { toast } from "sonner";
 import { Building2, Plus, UserPlus, Power } from "lucide-react";
 
@@ -108,7 +109,8 @@ export default function TenantsPage() {
   }
 
   return (
-    <div className="scan-in">
+    <RoleGate allowed={["super_admin"]}>
+      <div className="scan-in">
       <PageHeader
         code="07 / tenancy"
         title="Tenants"
@@ -309,6 +311,7 @@ export default function TenantsPage() {
           </form>
         </SheetContent>
       </Sheet>
-    </div>
+      </div>
+    </RoleGate>
   );
 }

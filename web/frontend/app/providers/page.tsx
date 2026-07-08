@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   useProviders,
   useCreateProvider,
@@ -78,11 +78,7 @@ export default function ProvidersPage() {
   const [editCustomHost, setEditCustomHost] = useState("");
   const [editWeight, setEditWeight] = useState("1");
   const [editRequestTimeout, setEditRequestTimeout] = useState("30000");
-  const [role, setRole] = useState<string | null>(null);
-
-  useEffect(() => {
-    setRole(currentRole());
-  }, []);
+  const [role] = useState<string | null>(() => currentRole());
 
   const canManageProviders = role === "super_admin";
 

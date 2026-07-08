@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/warm3snow/llm-gateway/internal/middleware"
+	"github.com/warm3snow/llm-gateway/internal/models"
 	"github.com/warm3snow/llm-gateway/internal/service"
 	"github.com/warm3snow/llm-gateway/internal/types"
 )
@@ -75,7 +76,16 @@ func (h *UsageHandler) GetRecords(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
 	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
 
-	records, total, err := h.service.GetRecords(middleware.EffectiveTenantID(c), provider, model, statusCode, startDate, endDate, limit, offset)
+	scope, ok := usageAccessScope(c)
+	if !ok {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, types.ErrorResponse{
+			Message: "Missing user scope",
+			Type:    "unauthorized",
+		})
+		return
+	}
+
+	records, total, err := h.service.GetRecords(scope, provider, model, statusCode, startDate, endDate, limit, offset)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, types.ErrorResponse{
 			Message: "Failed to get usage records",
@@ -108,6 +118,18 @@ func (h *UsageHandler) GetRecords(c *gin.Context) {
 // @Failure 500 {object} types.ErrorResponse "Internal error"
 // @Security BearerAuth
 // @Router /api/v1/usage/{id} [get]
+func usageAccessScope(c *gin.Context) (service.AccessScope, bool) {
+	scope := service.AccessScope{
+		TenantID: middleware.EffectiveTenantID(c),
+		Role:     currentRole(c),
+		UserID:   currentUserID(c),
+	}
+	if scope.Role == models.RoleTenantUser && scope.UserID == nil {
+		return scope, false
+	}
+	return scope, true
+}
+
 func (h *UsageHandler) GetRecord(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
@@ -118,7 +140,16 @@ func (h *UsageHandler) GetRecord(c *gin.Context) {
 		return
 	}
 
-	record, err := h.service.GetRecordByID(middleware.EffectiveTenantID(c), uint(id))
+	scope, ok := usageAccessScope(c)
+	if !ok {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, types.ErrorResponse{
+			Message: "Missing user scope",
+			Type:    "unauthorized",
+		})
+		return
+	}
+
+	record, err := h.service.GetRecordByID(scope, uint(id))
 	if err != nil {
 		status := http.StatusInternalServerError
 		if err.Error() == "record not found" {

@@ -25,7 +25,7 @@ func (p *ProxyHandlers) HandleChatCompletion(c *gin.Context) {}
 
 // HandleCompletion 文本补全
 // @Summary Text completion
-// @Description Create a text completion (legacy)
+// @Description Create a text completion
 // @Tags proxy
 // @Accept json
 // @Produce json

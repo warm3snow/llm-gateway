@@ -47,7 +47,10 @@ export default function TopBar({
   const tenantMeta = session.tenant
     ? `${session.tenant.slug} · ${session.tenant.role}`
     : session.user?.role;
-  useEffect(() => setMounted(true), []);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => setMounted(true));
+    return () => cancelAnimationFrame(frame);
+  }, []);
 
   // Build breadcrumb segments
   const segments = pathname.split("/").filter(Boolean);

@@ -6,18 +6,18 @@ import (
 
 // CacheEntry represents a cached response
 type CacheEntry struct {
-	ID           uint      `gorm:"primaryKey" json:"id"`
-	CacheKey     string    `gorm:"size:64;uniqueIndex;not null" json:"-"` // Hash of request
-	CacheKeyShort string    `gorm:"size:16" json:"cache_key_short"`  // First 8 chars for identification
-	RequestText  string    `gorm:"type:text" json:"request_text,omitempty"`
-	ResponseText string    `gorm:"type:text" json:"-"` // Response body, excluded from list queries
-	Provider     string    `gorm:"size:50;index" json:"provider"`
-	Model        string    `gorm:"size:100;index" json:"model"`
-	Embedding    []byte    `gorm:"type:blob" json:"-"` // For semantic caching
-	CreatedAt    time.Time `gorm:"index" json:"created_at"`
-	ExpiresAt    time.Time `gorm:"index" json:"expires_at"`
-	AccessCount  int       `gorm:"default:0" json:"access_count"`
-	LastAccessAt time.Time `json:"last_access_at"`
+	ID            uint      `gorm:"primaryKey" json:"id"`
+	CacheKey      string    `gorm:"size:64;uniqueIndex;not null" json:"-"` // Hash of request
+	CacheKeyShort string    `gorm:"size:16" json:"cache_key_short"`        // First 8 chars for identification
+	RequestText   string    `gorm:"type:text" json:"request_text,omitempty"`
+	ResponseText  string    `gorm:"type:text" json:"-"` // Response body, excluded from list queries
+	Provider      string    `gorm:"size:50;index" json:"provider"`
+	Model         string    `gorm:"size:100;index" json:"model"`
+	Embedding     []byte    `json:"-"` // For semantic caching
+	CreatedAt     time.Time `gorm:"index" json:"created_at"`
+	ExpiresAt     time.Time `gorm:"index" json:"expires_at"`
+	AccessCount   int       `gorm:"default:0" json:"access_count"`
+	LastAccessAt  time.Time `json:"last_access_at"`
 }
 
 // TableName specifies the table name

@@ -25,11 +25,6 @@ func NewHandler(cfg *config.Config) *Handler {
 	return &Handler{Config: cfg, providerSvc: service.NewProviderConfigService()}
 }
 
-// RegisterRoutes 注册路由（无JWT保护，用于向后兼容）
-func (h *Handler) RegisterRoutes(router *gin.Engine) {
-	h.RegisterRoutesWithAuth(router, nil)
-}
-
 // RegisterRoutesWithAuth 注册路由（可传入JWT中间件）
 func (h *Handler) RegisterRoutesWithAuth(router *gin.Engine, jwtMiddleware gin.HandlerFunc) {
 	// 静态文件
@@ -62,9 +57,6 @@ func (h *Handler) RegisterRoutesWithAuth(router *gin.Engine, jwtMiddleware gin.H
 		api.POST("/providers", h.AddProvider)
 		api.PUT("/providers/:name", h.UpdateProvider)
 		api.DELETE("/providers/:name", h.RemoveProvider)
-
-		// 统计信息
-		api.GET("/stats", h.GetStats)
 
 		// 健康检查
 		api.GET("/health", h.HealthCheck)
@@ -112,6 +104,14 @@ func (h *Handler) ConfigPage(c *gin.Context) {
 // @Security BearerAuth
 // @Router /api/v1/admin/config [get]
 func (h *Handler) GetConfig(c *gin.Context) {
+	if !middleware.IsSuperAdmin(c) {
+		c.AbortWithStatusJSON(http.StatusForbidden, types.ErrorResponse{
+			Message: "Only super_admin can view configuration",
+			Type:    "forbidden",
+		})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"data":   h.Config,
 		"status": "success",
@@ -133,6 +133,14 @@ func (h *Handler) GetConfig(c *gin.Context) {
 // @Security BearerAuth
 // @Router /api/v1/admin/config [post]
 func (h *Handler) UpdateConfig(c *gin.Context) {
+	if !middleware.IsSuperAdmin(c) {
+		c.AbortWithStatusJSON(http.StatusForbidden, types.ErrorResponse{
+			Message: "Only super_admin can update configuration",
+			Type:    "forbidden",
+		})
+		return
+	}
+
 	var newConfig config.Config
 
 	if err := c.ShouldBindJSON(&newConfig); err != nil {
@@ -462,50 +470,6 @@ func (h *Handler) RemoveProvider(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"message": fmt.Sprintf("Provider '%s' removed successfully", name),
 		"status":  "success",
-	})
-}
-
-// GetStats 获取统计信息
-// @Summary Get stats
-// @Description Get gateway statistics
-// @Tags admin
-// @Accept json
-// @Produce json
-// @Success 200 {object} map[string]interface{} "Stats data"
-// @Failure 401 {object} types.ErrorResponse "Unauthorized"
-// @Failure 500 {object} types.ErrorResponse "Internal error"
-// @Security BearerAuth
-// @Router /api/v1/admin/stats [get]
-func (h *Handler) GetStats(c *gin.Context) {
-	// Legacy endpoint — superseded by /api/v1/stats/overview. Derive real
-	// figures from usage records instead of returning canned numbers.
-	overview, err := service.NewStatsService().GetOverview(middleware.EffectiveTenantID(c))
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":  fmt.Sprintf("Failed to compute stats: %v", err),
-			"status": "error",
-		})
-		return
-	}
-
-	providersCount := overview.ActiveProviders
-	if providersCount == 0 {
-		h.Config.Gateway.ProvidersMu.RLock()
-		providersCount = len(h.Config.Gateway.Providers)
-		h.Config.Gateway.ProvidersMu.RUnlock()
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"stats": gin.H{
-			"totalRequests":      overview.TotalRequests,
-			"successfulRequests": int64(float64(overview.TotalRequests) * overview.SuccessRate / 100),
-			"failedRequests":     overview.TotalRequests - int64(float64(overview.TotalRequests)*overview.SuccessRate/100),
-			"totalTokens":        overview.TotalTokens,
-			"totalCost":          overview.TotalCost,
-			"successRate":        overview.SuccessRate,
-			"providersCount":     providersCount,
-		},
-		"status": "success",
 	})
 }
 

@@ -206,8 +206,7 @@ func modelToOptions(provider *models.ProviderConfig) (types.Options, error) {
 	if provider.Config != "" {
 		configJSON, err := encryption.Decrypt(provider.Config)
 		if err != nil {
-			// Backward compatibility for rows written before Config was encrypted.
-			configJSON = provider.Config
+			return types.Options{}, fmt.Errorf("failed to decrypt provider config: %w", err)
 		}
 		if err := json.Unmarshal([]byte(configJSON), &extra); err != nil {
 			return types.Options{}, fmt.Errorf("failed to decode provider config: %w", err)

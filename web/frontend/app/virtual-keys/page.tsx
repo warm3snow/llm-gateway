@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import {
   useVirtualKeys,
   useProviders,
@@ -60,11 +60,7 @@ export default function VirtualKeysPage() {
   const [editBudget, setEditBudget] = useState("");
   const [editRateLimit, setEditRateLimit] = useState("0");
   const [editProviderNames, setEditProviderNames] = useState<string[]>([]);
-  const [role, setRole] = useState<string | null>(null);
-
-  useEffect(() => {
-    setRole(currentRole());
-  }, []);
+  const [role] = useState<string | null>(() => currentRole());
 
   const canCreateKey = role !== null;
   const canManageKey = role !== null && role !== "tenant_user";

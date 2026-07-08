@@ -303,32 +303,6 @@ paths:
       summary: Remove provider
       tags:
       - admin
-  /api/v1/admin/stats:
-    get:
-      consumes:
-      - application/json
-      description: Get gateway statistics
-      produces:
-      - application/json
-      responses:
-        "200":
-          description: Stats data
-          schema:
-            additionalProperties: true
-            type: object
-        "401":
-          description: Unauthorized
-          schema:
-            $ref: '#/definitions/types.ErrorResponse'
-        "500":
-          description: Internal error
-          schema:
-            $ref: '#/definitions/types.ErrorResponse'
-      security:
-      - BearerAuth: []
-      summary: Get stats
-      tags:
-      - admin
   /api/v1/auth/login:
     post:
       consumes:
@@ -914,7 +888,7 @@ paths:
     post:
       consumes:
       - application/json
-      description: Create a text completion (legacy)
+      description: Create a text completion
       parameters:
       - description: Completion request
         in: body

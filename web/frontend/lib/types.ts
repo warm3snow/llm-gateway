@@ -66,13 +66,22 @@ export interface TenantUsersResponse {
 
 export interface UsageRecord {
   id: number;
+  tenant_id?: number;
   request_id: string;
+  virtual_key_id?: number;
   virtual_key_name?: string;
+  virtual_key_created_by_user_id?: number;
+  virtual_key_created_by_username?: string;
   provider: string;
   model: string;
   endpoint: string;
   status_code: number;
   error_message?: string;
+  model_input_kind?: string;
+  model_input_preview?: string;
+  model_input_truncated?: boolean;
+  model_input_bytes?: number;
+  model_input_preview_bytes?: number;
   input_tokens: number;
   output_tokens: number;
   cost: number;

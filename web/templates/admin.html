@@ -315,18 +315,11 @@
 
         // Dashboard
         function loadDashboard() {
-            $.get('/api/v1/admin/stats', function(data) {
-                if (data.status === 'success') {
-                    $('#stat-total-requests').text(data.stats.totalRequests || 0);
-                    $('#stat-providers').text(data.stats.providersCount || 0);
-                    $('#stat-avg-latency').text(data.stats.averageLatency || '0ms');
-                    
-                    var successRate = 0;
-                    if (data.stats.totalRequests > 0) {
-                        successRate = (data.stats.successfulRequests / data.stats.totalRequests * 100).toFixed(1);
-                    }
-                    $('#stat-success-rate').text(successRate + '%');
-                }
+            $.get('/api/v1/stats/overview', function(data) {
+                $('#stat-total-requests').text(data.totalRequests || 0);
+                $('#stat-providers').text(data.activeProviders || 0);
+                $('#stat-avg-latency').text('0ms');
+                $('#stat-success-rate').text((data.successRate || 0).toFixed(1) + '%');
             });
         }
 

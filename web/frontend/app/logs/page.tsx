@@ -1,13 +1,23 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useUsage } from "@/lib/queries";
+import { currentRole } from "@/lib/api";
+import type { UsageRecord } from "@/lib/types";
+import { roleScopeLabel } from "@/components/auth/RoleGate";
 import { PageHeader } from "@/components/ui/page-header";
-import { Panel, PanelHeader, PanelTitle } from "@/components/ui/panel";
+import { Panel } from "@/components/ui/panel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import {
   Activity,
   Filter,
@@ -15,6 +25,10 @@ import {
   RotateCw,
   ChevronLeft,
   ChevronRight,
+  Copy,
+  Eye,
+  Maximize2,
+  Minimize2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -37,9 +51,25 @@ function fmtDate(iso: string) {
   });
 }
 
+function inputSummary(log: UsageRecord) {
+  const value = (log.model_input_preview ?? "").replace(/\s+/g, " ").trim();
+  if (!value) return "—";
+  return value.length > 110 ? `${value.slice(0, 110)}…` : value;
+}
+
+function metaValue(value: unknown) {
+  if (value == null || value === "") return "—";
+  if (typeof value === "boolean") return value ? "yes" : "no";
+  return String(value);
+}
+
 export default function LogsPage() {
   const [page, setPage] = useState(0);
   const [filter, setFilter] = useState<StatusFilter>("all");
+  const [selected, setSelected] = useState<UsageRecord | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [role] = useState<string | null>(() => currentRole());
+
   const { data, isLoading, refetch, isFetching } = useUsage({
     limit: PAGE_SIZE,
     offset: page * PAGE_SIZE,
@@ -49,12 +79,6 @@ export default function LogsPage() {
   const total = data?.total ?? 0;
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
-  // Reset to the first page whenever the status filter changes so the
-  // client-side filter always operates on a fresh page.
-  useEffect(() => {
-    setPage(0);
-  }, [filter]);
-
   // Status filter is applied client-side within the current page.
   const filtered = logs.filter((l) => {
     if (filter === "all") return true;
@@ -62,6 +86,11 @@ export default function LogsPage() {
     if (filter === "error") return l.status_code >= 400;
     return true;
   });
+
+  async function copyPreview() {
+    if (!selected?.model_input_preview) return;
+    await navigator.clipboard?.writeText(selected.model_input_preview);
+  }
 
   const filterOptions: { key: StatusFilter; label: string; count: number }[] = [
     { key: "all", label: "all", count: logs.length },
@@ -82,7 +111,7 @@ export default function LogsPage() {
       <PageHeader
         code="04 / telemetry"
         title="Request Logs"
-        description="Every proxied request, in order"
+        description={`Every proxied request, in order · ${roleScopeLabel(role)}`}
         actions={
           <div className="flex items-center gap-2">
             <Button
@@ -112,7 +141,10 @@ export default function LogsPage() {
           {filterOptions.map((opt) => (
             <button
               key={opt.key}
-              onClick={() => setFilter(opt.key)}
+              onClick={() => {
+                setPage(0);
+                setFilter(opt.key);
+              }}
               className={cn(
                 "flex items-center gap-1.5 rounded-sm px-2.5 py-1 font-mono text-[11px] uppercase tracking-wider transition-all",
                 filter === opt.key
@@ -155,10 +187,12 @@ export default function LogsPage() {
                     "vkey",
                     "provider",
                     "model",
+                    "input",
                     "endpoint",
                     "status",
                     "tokens",
                     "cost",
+                    "details",
                   ].map((h) => (
                     <th
                       key={h}
@@ -196,6 +230,16 @@ export default function LogsPage() {
                           {log.model || "—"}
                         </span>
                       </td>
+                      <td className="max-w-[260px] px-4 py-2.5">
+                        <div className="flex items-center gap-2">
+                          <span className="truncate text-muted-foreground/70">
+                            {inputSummary(log)}
+                          </span>
+                          {log.model_input_truncated && (
+                            <Badge variant="warning">truncated</Badge>
+                          )}
+                        </div>
+                      </td>
                       <td className="px-4 py-2.5">
                         <span className="text-muted-foreground/70">
                           {log.endpoint}
@@ -223,6 +267,19 @@ export default function LogsPage() {
                           ${log.cost?.toFixed(6) ?? "0.000000"}
                         </span>
                       </td>
+                      <td className="px-4 py-2.5">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setSelected(log);
+                            setExpanded(false);
+                          }}
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                          details
+                        </Button>
+                      </td>
                     </tr>
                   );
                 })}
@@ -231,6 +288,88 @@ export default function LogsPage() {
           </div>
         )}
       </Panel>
+
+      <Sheet open={!!selected} onOpenChange={(open) => !open && setSelected(null)}>
+        <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-2xl">
+          {selected && (
+            <div className="flex min-h-full flex-col gap-4 p-4">
+              <SheetHeader className="border-b border-border pb-4 pr-8">
+                <SheetTitle className="font-mono text-sm uppercase tracking-wider text-primary">
+                  request detail
+                </SheetTitle>
+                <SheetDescription className="font-mono text-[12px] text-muted-foreground">
+                  {selected.provider} · {selected.model || "unknown model"} · {fmtTime(selected.created_at)}
+                </SheetDescription>
+              </SheetHeader>
+
+              <div className="grid grid-cols-2 gap-2 font-mono text-[11px] md:grid-cols-3">
+                {[
+                  ["status", selected.status_code],
+                  ["request", selected.request_id],
+                  ["tenant", role === "super_admin" ? selected.tenant_id : undefined],
+                  ["vkey", selected.virtual_key_name],
+                  ["creator", selected.virtual_key_created_by_username],
+                  ["endpoint", selected.endpoint],
+                  ["input tokens", selected.input_tokens],
+                  ["output tokens", selected.output_tokens],
+                  ["cost", `$${selected.cost?.toFixed(6) ?? "0.000000"}`],
+                  ["input kind", selected.model_input_kind],
+                  ["input bytes", selected.model_input_bytes],
+                  ["preview bytes", selected.model_input_preview_bytes],
+                  ["truncated", selected.model_input_truncated],
+                ].map(([label, value]) => (
+                  <div key={String(label)} className="rounded-sm border border-border bg-card/40 p-2">
+                    <div className="uppercase tracking-wider text-muted-foreground/60">{String(label)}</div>
+                    <div className="mt-1 break-words text-foreground">{metaValue(value)}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex items-center justify-between gap-2 border-b border-border pb-2">
+                <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground/70">
+                  sanitized input preview
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={copyPreview}
+                    disabled={!selected.model_input_preview}
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                    copy
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => setExpanded((v) => !v)}>
+                    {expanded ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+                    {expanded ? "collapse" : "expand"}
+                  </Button>
+                </div>
+              </div>
+
+              <pre
+                className={cn(
+                  "overflow-auto whitespace-pre-wrap break-words rounded-sm border border-border bg-background/70 p-3 font-mono text-[12px] text-foreground",
+                  expanded ? "max-h-none" : "max-h-[60vh]"
+                )}
+              >
+                {selected.model_input_preview || "No input preview captured for this request."}
+              </pre>
+
+              <div className="rounded-sm border border-warning/30 bg-warning/5 p-3 font-mono text-[11px] text-warning">
+                {selected.model_input_truncated
+                  ? "Preview truncated. Only the first bytes of sanitized input are stored; the raw request is not persisted."
+                  : "Sanitized preview only. The raw request is not persisted."}
+              </div>
+
+              {selected.error_message && (
+                <div className="rounded-sm border border-destructive/30 bg-destructive/5 p-3 font-mono text-[11px] text-destructive">
+                  {selected.error_message}
+                </div>
+              )}
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
 
       {/* Pagination footer */}
       <div className="mt-4 flex items-center justify-between font-mono text-[11px] text-muted-foreground">

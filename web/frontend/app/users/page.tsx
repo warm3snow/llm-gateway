@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, currentRole, currentTenantId } from "@/lib/api";
 import type { TenantUser } from "@/lib/types";
@@ -31,24 +31,18 @@ function roleLabel(role: string) {
 
 export default function UsersPage() {
   const qc = useQueryClient();
-  const [role, setRole] = useState<string | null>(null);
-  const [tenantId, setTenantId] = useState<number | null>(null);
+  const [role] = useState<string | null>(() => currentRole());
+  const [tenantId] = useState<number | null>(() => currentTenantId());
   const [open, setOpen] = useState(false);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [newRole, setNewRole] = useState("tenant_user");
-  const [selectedTenant, setSelectedTenant] = useState("");
-  const [filterTenant, setFilterTenant] = useState("");
-
-  useEffect(() => {
+  const [selectedTenant, setSelectedTenant] = useState(() => {
     const r = currentRole();
-    setRole(r);
     const tid = currentTenantId();
-    setTenantId(tid);
-    if (r === "tenant_admin" && tid != null) {
-      setSelectedTenant(String(tid));
-    }
-  }, []);
+    return r === "tenant_admin" && tid != null ? String(tid) : "";
+  });
+  const [filterTenant, setFilterTenant] = useState("");
 
   const isSuperAdmin = role === "super_admin";
   const canManageUsers = role === "super_admin" || role === "tenant_admin";

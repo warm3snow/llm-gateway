@@ -113,6 +113,8 @@ func VirtualKeyAuth(cfg *config.Config) gin.HandlerFunc {
 		// Set context values for downstream handlers
 		c.Set("virtual_key_id", matchedKey.ID)
 		c.Set("virtual_key_name", matchedKey.Name)
+		c.Set("virtual_key_created_by_user_id", matchedKey.CreatedByUserID)
+		c.Set("virtual_key_created_by_username", matchedKey.CreatedByUsername)
 		c.Set("tenant_id", matchedKey.TenantID)
 
 		c.Next()

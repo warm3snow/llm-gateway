@@ -12,6 +12,13 @@ import (
 	"github.com/warm3snow/llm-gateway/internal/types"
 )
 
+func testRoleMiddleware(role string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Set("role", role)
+		c.Next()
+	}
+}
+
 // TestNewHandler 测试创建 Handler
 func TestNewHandler(t *testing.T) {
 	cfg := &config.Config{
@@ -66,8 +73,8 @@ func TestMaskAPIKey(t *testing.T) {
 	}
 }
 
-// TestRegisterRoutes 测试路由注册
-func TestRegisterRoutes(t *testing.T) {
+// TestRegisterRoutesWithAuth 测试受保护路由注册。
+func TestRegisterRoutesWithAuth(t *testing.T) {
 	cfg := &config.Config{
 		Server: config.ServerConfig{
 			Host: "localhost",
@@ -78,9 +85,8 @@ func TestRegisterRoutes(t *testing.T) {
 	handler := NewHandler(cfg)
 	router := gin.New()
 
-	// 不应该 panic
 	assert.NotPanics(t, func() {
-		handler.RegisterRoutes(router)
+		handler.RegisterRoutesWithAuth(router, testRoleMiddleware("super_admin"))
 	})
 }
 
@@ -98,7 +104,7 @@ func TestGetConfig(t *testing.T) {
 
 	handler := NewHandler(cfg)
 	router := gin.Default()
-	handler.RegisterRoutes(router)
+	handler.RegisterRoutesWithAuth(router, testRoleMiddleware("super_admin"))
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/api/v1/admin/config", nil)
@@ -119,7 +125,7 @@ func TestHealthCheck(t *testing.T) {
 
 	handler := NewHandler(cfg)
 	router := gin.Default()
-	handler.RegisterRoutes(router)
+	handler.RegisterRoutesWithAuth(router, testRoleMiddleware("super_admin"))
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/api/v1/admin/health", nil)
@@ -154,7 +160,7 @@ func TestGetProviders(t *testing.T) {
 
 	handler := NewHandler(cfg)
 	router := gin.Default()
-	handler.RegisterRoutes(router)
+	handler.RegisterRoutesWithAuth(router, testRoleMiddleware("super_admin"))
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("GET", "/api/v1/admin/providers", nil)
@@ -162,26 +168,6 @@ func TestGetProviders(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 	assert.Contains(t, w.Body.String(), "openai")
-}
-
-// TestGetStats 测试获取统计信息 API
-func TestGetStats(t *testing.T) {
-	cfg := &config.Config{
-		Server: config.ServerConfig{
-			Host: "localhost",
-			Port: 8080,
-		},
-	}
-
-	handler := NewHandler(cfg)
-	router := gin.Default()
-	handler.RegisterRoutes(router)
-
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest("GET", "/api/v1/admin/stats", nil)
-	router.ServeHTTP(w, req)
-
-	assert.Equal(t, http.StatusOK, w.Code)
 }
 
 // TestUpdateConfig 测试更新配置 API
@@ -195,7 +181,7 @@ func TestUpdateConfig(t *testing.T) {
 
 	handler := NewHandler(cfg)
 	router := gin.Default()
-	handler.RegisterRoutes(router)
+	handler.RegisterRoutesWithAuth(router, testRoleMiddleware("super_admin"))
 
 	// 测试：无效的请求体
 	t.Run("Invalid request body", func(t *testing.T) {
@@ -241,11 +227,7 @@ func TestAddProvider(t *testing.T) {
 
 	handler := NewHandler(cfg)
 	router := gin.Default()
-	router.Use(func(c *gin.Context) {
-		c.Set("role", "super_admin")
-		c.Next()
-	})
-	handler.RegisterRoutes(router)
+	handler.RegisterRoutesWithAuth(router, testRoleMiddleware("super_admin"))
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("POST", "/api/v1/admin/providers", nil)
@@ -266,11 +248,7 @@ func TestRemoveProvider(t *testing.T) {
 
 	handler := NewHandler(cfg)
 	router := gin.Default()
-	router.Use(func(c *gin.Context) {
-		c.Set("role", "super_admin")
-		c.Next()
-	})
-	handler.RegisterRoutes(router)
+	handler.RegisterRoutesWithAuth(router, testRoleMiddleware("super_admin"))
 
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest("DELETE", "/api/v1/admin/providers/openai", nil)
@@ -292,11 +270,7 @@ func TestTenantRolesCannotWriteProviders(t *testing.T) {
 		t.Run(role, func(t *testing.T) {
 			handler := NewHandler(cfg)
 			router := gin.Default()
-			router.Use(func(c *gin.Context) {
-				c.Set("role", role)
-				c.Next()
-			})
-			handler.RegisterRoutes(router)
+			handler.RegisterRoutesWithAuth(router, testRoleMiddleware(role))
 
 			for _, tc := range []struct {
 				method string

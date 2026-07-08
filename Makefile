@@ -4,8 +4,11 @@ BASE_DIR := $(shell pwd)
 FRONTEND_DIR := $(BASE_DIR)/web/frontend
 BACKEND_PORT := 8080
 FRONTEND_PORT := 3000
+DOCKER_CONTEXT_HOST := $(shell docker context inspect --format '{{json .Endpoints.docker.Host}}' 2>/dev/null | tr -d '"')
+TESTCONTAINERS_DOCKER_HOST := $(if $(DOCKER_HOST),$(DOCKER_HOST),$(DOCKER_CONTEXT_HOST))
+TESTCONTAINERS_RYUK := $(if $(TESTCONTAINERS_RYUK_DISABLED),$(TESTCONTAINERS_RYUK_DISABLED),$(if $(filter rancher-desktop,$(shell docker context show 2>/dev/null)),true,false))
 
-.PHONY: all build run dev stop clean test lint fmt seed-dev seed-demo traffic-demo demo-data
+.PHONY: all build run dev stop clean test test-unit test-api test-integration test-e2e lint fmt seed-dev seed-demo traffic-demo demo-data
 
 ## 默认目标
 all: build
@@ -99,9 +102,23 @@ clean:
 ## 测试 & 代码质量
 ## ============================================================
 
-test:
-	@echo "==> Running tests..."
-	go test ./... -v -short
+test: test-unit
+
+test-unit:
+	@echo "==> Running unit tests..."
+	go test ./... -v -short -timeout 60s
+
+test-api:
+	@echo "==> Running API tests..."
+	go test ./tests/api/... -v -timeout 30s
+
+test-integration:
+	@echo "==> Running integration tests..."
+	@if [ -d tests/integration ]; then DOCKER_HOST="$(TESTCONTAINERS_DOCKER_HOST)" TESTCONTAINERS_RYUK_DISABLED="$(TESTCONTAINERS_RYUK)" go test -tags=integration ./tests/integration/... -v -timeout 3m -count=1; else echo "    No integration tests yet."; fi
+
+test-e2e:
+	@echo "==> Running E2E tests..."
+	@if [ -d tests/e2e ]; then DOCKER_HOST="$(TESTCONTAINERS_DOCKER_HOST)" TESTCONTAINERS_RYUK_DISABLED="$(TESTCONTAINERS_RYUK)" go test -tags=e2e ./tests/e2e/... -v -timeout 2m; else echo "    No E2E tests yet."; fi
 
 test-coverage:
 	@echo "==> Running tests with coverage..."

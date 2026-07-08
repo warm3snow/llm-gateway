@@ -27,17 +27,17 @@ export const queryKeys = {
   config: ["config"] as const,
 };
 
-export function useStats() {
+export function useStats(params?: { tenant_id?: number }) {
   return useQuery<DashboardStats>({
-    queryKey: queryKeys.stats,
-    queryFn: api.getStats,
+    queryKey: [...queryKeys.stats, params],
+    queryFn: () => api.getStats(params),
   });
 }
 
-export function useAnalytics() {
+export function useAnalytics(params?: { tenant_id?: number }) {
   return useQuery<AnalyticsData>({
-    queryKey: queryKeys.analytics,
-    queryFn: api.getAnalytics,
+    queryKey: [...queryKeys.analytics, params],
+    queryFn: () => api.getAnalytics(params),
   });
 }
 
@@ -86,6 +86,9 @@ export function useUsage(params?: {
   provider?: string;
   model?: string;
   status_code?: number;
+  tenant_id?: number;
+  start_date?: string;
+  end_date?: string;
 }) {
   return useQuery<UsageResponse>({
     queryKey: [...queryKeys.usage, params],

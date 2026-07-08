@@ -5,18 +5,14 @@ import (
 
 	"github.com/warm3snow/llm-gateway/internal/models"
 	"golang.org/x/crypto/bcrypt"
-	"gorm.io/gorm"
 )
 
-// DefaultTenantID is the tenant that legacy (pre-multi-tenant) resources are
-// assigned to during migration.
+// DefaultTenantID is the initial tenant created for new installations.
 const DefaultTenantID uint = 1
 
 // Bootstrap seeds the data required for multi-tenancy to work:
-//  1. a default tenant (id=1) that owns all pre-existing resources,
-//  2. backfill of any virtual_keys / usage_records that predate the
-//     tenant_id column (tenant_id = 0) onto the default tenant,
-//  3. a super_admin user derived from the config admin credentials.
+//  1. a default tenant (id=1),
+//  2. a super_admin user derived from the config admin credentials.
 //
 // It is idempotent and safe to call on every startup.
 func Bootstrap(adminUser, adminPass string) error {
@@ -46,17 +42,7 @@ func Bootstrap(adminUser, adminPass string) error {
 		log.Printf("[BOOTSTRAP] Created default tenant (id=%d)", DefaultTenantID)
 	}
 
-	// 2. Backfill legacy rows with tenant_id = 0.
-	if err := DB.Model(&models.VirtualKey{}).Where("tenant_id = ?", 0).
-		Update("tenant_id", DefaultTenantID).Error; err != nil {
-		return err
-	}
-	if err := DB.Model(&models.UsageRecord{}).Where("tenant_id = ?", 0).
-		Update("tenant_id", DefaultTenantID).Error; err != nil {
-		return err
-	}
-
-	// 3. Super-admin user from config credentials.
+	// 2. Super-admin user from config credentials.
 	var count int64
 	if err := DB.Model(&models.User{}).Where("username = ?", adminUser).Count(&count).Error; err != nil {
 		return err
@@ -80,55 +66,5 @@ func Bootstrap(adminUser, adminPass string) error {
 		log.Printf("[BOOTSTRAP] Created super_admin user %q", adminUser)
 	}
 
-	return backfillTenantMembers()
-}
-
-func backfillTenantMembers() error {
-	return DB.Transaction(func(tx *gorm.DB) error {
-		var users []models.User
-		if err := tx.Order("id ASC").Find(&users).Error; err != nil {
-			return err
-		}
-
-		for _, user := range users {
-			if user.Email == "" {
-				email := models.DefaultUserEmail(user.Username, "platform")
-				if user.TenantID != nil {
-					var tenant models.Tenant
-					if err := tx.First(&tenant, *user.TenantID).Error; err != nil {
-						return err
-					}
-					email = models.DefaultUserEmail(user.Username, tenant.Slug)
-				}
-				if err := tx.Model(&models.User{}).Where("id = ?", user.ID).Update("email", email).Error; err != nil {
-					return err
-				}
-			}
-
-			if user.TenantID == nil || user.Role == models.RoleSuperAdmin {
-				continue
-			}
-
-			role := user.Role
-			if role == "" {
-				role = models.RoleTenantUser
-			}
-			status := user.Status
-			if status == "" {
-				status = "active"
-			}
-
-			member := models.TenantMember{
-				TenantID: *user.TenantID,
-				UserID:   user.ID,
-			}
-			if err := tx.Where("tenant_id = ? AND user_id = ?", member.TenantID, member.UserID).
-				Assign(models.TenantMember{Role: role, Status: status}).
-				FirstOrCreate(&member).Error; err != nil {
-				return err
-			}
-		}
-
-		return nil
-	})
+	return nil
 }

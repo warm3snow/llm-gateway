@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/warm3snow/llm-gateway/internal/config"
 	"github.com/warm3snow/llm-gateway/internal/middleware"
+	"github.com/warm3snow/llm-gateway/internal/models"
 	"github.com/warm3snow/llm-gateway/internal/service"
 	"github.com/warm3snow/llm-gateway/internal/types"
 )
@@ -58,11 +59,31 @@ func windowFromQuery(c *gin.Context) (time.Time, time.Time) {
 	return start, end
 }
 
+func statsAccessScope(c *gin.Context) (service.AccessScope, bool) {
+	scope := service.AccessScope{
+		TenantID: middleware.EffectiveTenantID(c),
+		Role:     currentRole(c),
+		UserID:   currentUserID(c),
+	}
+	if scope.Role == models.RoleTenantUser && scope.UserID == nil {
+		return scope, false
+	}
+	return scope, true
+}
+
 // GetHourly returns hourly-bucketed time series for the requested window.
 // GET /api/v1/stats/hourly?hours=24
 func (h *StatsHandler) GetHourly(c *gin.Context) {
 	start, end := windowFromQuery(c)
-	points, err := h.service.GetHourlyTimeSeries(middleware.EffectiveTenantID(c), start, end)
+	scope, ok := statsAccessScope(c)
+	if !ok {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, types.ErrorResponse{
+			Message: "Missing user scope",
+			Type:    "unauthorized",
+		})
+		return
+	}
+	points, err := h.service.GetHourlyTimeSeries(scope, start, end)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, types.ErrorResponse{
 			Message: "Failed to get hourly stats",
@@ -86,7 +107,15 @@ func (h *StatsHandler) GetHourly(c *gin.Context) {
 // @Security BearerAuth
 // @Router /api/v1/stats/overview [get]
 func (h *StatsHandler) GetOverview(c *gin.Context) {
-	overview, err := h.service.GetOverview(middleware.EffectiveTenantID(c))
+	scope, ok := statsAccessScope(c)
+	if !ok {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, types.ErrorResponse{
+			Message: "Missing user scope",
+			Type:    "unauthorized",
+		})
+		return
+	}
+	overview, err := h.service.GetOverview(scope)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, types.ErrorResponse{
 			Message: "Failed to get stats overview",
@@ -95,8 +124,8 @@ func (h *StatsHandler) GetOverview(c *gin.Context) {
 		return
 	}
 
-	// If no usage recorded yet, count configured providers
-	if overview.ActiveProviders == 0 {
+	// If no usage recorded yet, count configured providers for admin scopes.
+	if overview.ActiveProviders == 0 && scope.Role != models.RoleTenantUser {
 		h.cfg.Gateway.ProvidersMu.RLock()
 		overview.ActiveProviders = len(h.cfg.Gateway.Providers)
 		h.cfg.Gateway.ProvidersMu.RUnlock()
@@ -108,7 +137,15 @@ func (h *StatsHandler) GetOverview(c *gin.Context) {
 // GetAnalytics returns analytics data for the analytics page
 // GET /api/v1/stats/analytics
 func (h *StatsHandler) GetAnalytics(c *gin.Context) {
-	data, err := h.service.GetAnalytics(middleware.EffectiveTenantID(c))
+	scope, ok := statsAccessScope(c)
+	if !ok {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, types.ErrorResponse{
+			Message: "Missing user scope",
+			Type:    "unauthorized",
+		})
+		return
+	}
+	data, err := h.service.GetAnalytics(scope)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, types.ErrorResponse{
 			Message: "Failed to get analytics data",
@@ -117,8 +154,8 @@ func (h *StatsHandler) GetAnalytics(c *gin.Context) {
 		return
 	}
 
-	// If no usage recorded yet, count configured providers
-	if data.ActiveProviders == 0 {
+	// If no usage recorded yet, count configured providers for admin scopes.
+	if data.ActiveProviders == 0 && scope.Role != models.RoleTenantUser {
 		h.cfg.Gateway.ProvidersMu.RLock()
 		data.ActiveProviders = len(h.cfg.Gateway.Providers)
 		h.cfg.Gateway.ProvidersMu.RUnlock()

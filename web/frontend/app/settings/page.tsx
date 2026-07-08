@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
+import { RoleGate } from "@/components/auth/RoleGate";
 import { toast } from "sonner";
 import {
   Save,
@@ -78,7 +79,8 @@ export default function SettingsPage() {
   const cacheTtlSec = Math.round((config.cache?.defaultTTL ?? 0) / 1e9) || 0;
 
   return (
-    <div className="scan-in">
+    <RoleGate allowed={["super_admin"]}>
+      <div className="scan-in">
       <PageHeader
         code="06 / system"
         title="Settings"
@@ -285,6 +287,7 @@ export default function SettingsPage() {
           </Panel>
         </div>
       )}
-    </div>
+      </div>
+    </RoleGate>
   );
 }

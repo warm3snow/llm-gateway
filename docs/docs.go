@@ -323,47 +323,6 @@ const docTemplate = `{
                 }
             }
         },
-        "/api/v1/admin/stats": {
-            "get": {
-                "security": [
-                    {
-                        "BearerAuth": []
-                    }
-                ],
-                "description": "Get gateway statistics",
-                "consumes": [
-                    "application/json"
-                ],
-                "produces": [
-                    "application/json"
-                ],
-                "tags": [
-                    "admin"
-                ],
-                "summary": "Get stats",
-                "responses": {
-                    "200": {
-                        "description": "Stats data",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": true
-                        }
-                    },
-                    "401": {
-                        "description": "Unauthorized",
-                        "schema": {
-                            "$ref": "#/definitions/types.ErrorResponse"
-                        }
-                    },
-                    "500": {
-                        "description": "Internal error",
-                        "schema": {
-                            "$ref": "#/definitions/types.ErrorResponse"
-                        }
-                    }
-                }
-            }
-        },
         "/api/v1/auth/login": {
             "post": {
                 "description": "Authenticate user and return JWT token",
@@ -1268,7 +1227,7 @@ const docTemplate = `{
                         "VirtualKeyAuth": []
                     }
                 ],
-                "description": "Create a text completion (legacy)",
+                "description": "Create a text completion",
                 "consumes": [
                     "application/json"
                 ],

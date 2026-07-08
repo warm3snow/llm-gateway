@@ -75,6 +75,8 @@ func UsageRecordMiddleware(cfg *config.Config, virtualKeyService *service.Virtua
 			c.Request.Body = io.NopCloser(bytes.NewBuffer(requestBody))
 		}
 
+		inputPreview := buildModelInputPreview(requestBody, modelInputPreviewMaxBytes)
+
 		// Wrap the response writer to capture the body
 		writer := &responseBodyWriter{
 			ResponseWriter: c.Writer,
@@ -138,6 +140,8 @@ func UsageRecordMiddleware(cfg *config.Config, virtualKeyService *service.Virtua
 		// Get virtual key info from context (set by VirtualKeyAuth middleware)
 		var virtualKeyID *uint
 		var virtualKeyName string
+		var virtualKeyCreatedByUserID *uint
+		var virtualKeyCreatedByUsername string
 		if id, exists := c.Get("virtual_key_id"); exists {
 			if v, ok := id.(uint); ok {
 				virtualKeyID = &v
@@ -146,6 +150,16 @@ func UsageRecordMiddleware(cfg *config.Config, virtualKeyService *service.Virtua
 		if name, exists := c.Get("virtual_key_name"); exists {
 			if n, ok := name.(string); ok {
 				virtualKeyName = n
+			}
+		}
+		if id, exists := c.Get("virtual_key_created_by_user_id"); exists {
+			if v, ok := id.(uint); ok {
+				virtualKeyCreatedByUserID = &v
+			}
+		}
+		if username, exists := c.Get("virtual_key_created_by_username"); exists {
+			if u, ok := username.(string); ok {
+				virtualKeyCreatedByUsername = u
 			}
 		}
 
@@ -181,18 +195,25 @@ func UsageRecordMiddleware(cfg *config.Config, virtualKeyService *service.Virtua
 		}
 
 		record := models.UsageRecord{
-			TenantID:       tenantID,
-			RequestID:      requestID,
-			VirtualKeyID:   virtualKeyID,
-			VirtualKeyName: virtualKeyName,
-			Provider:       provider,
-			Model:          model,
-			Endpoint:       c.Request.URL.Path,
-			StatusCode:     status,
-			ErrorMessage:   errorMessage,
-			InputTokens:    inputTokens,
-			OutputTokens:   outputTokens,
-			Cost:           cost,
+			TenantID:                    tenantID,
+			RequestID:                   requestID,
+			VirtualKeyID:                virtualKeyID,
+			VirtualKeyName:              virtualKeyName,
+			VirtualKeyCreatedByUserID:   virtualKeyCreatedByUserID,
+			VirtualKeyCreatedByUsername: virtualKeyCreatedByUsername,
+			Provider:                    provider,
+			Model:                       model,
+			Endpoint:                    c.Request.URL.Path,
+			StatusCode:                  status,
+			ErrorMessage:                errorMessage,
+			ModelInputKind:              inputPreview.Kind,
+			ModelInputPreview:           inputPreview.Preview,
+			ModelInputTruncated:         inputPreview.Truncated,
+			ModelInputBytes:             inputPreview.InputBytes,
+			ModelInputPreviewBytes:      inputPreview.PreviewBytes,
+			InputTokens:                 inputTokens,
+			OutputTokens:                outputTokens,
+			Cost:                        cost,
 		}
 
 		// Record real-time Prometheus metrics. Use the route template

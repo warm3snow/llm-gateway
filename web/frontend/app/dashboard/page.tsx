@@ -13,12 +13,8 @@ import { Button } from "@/components/ui/button";
 import {
   Activity,
   Zap,
-  DollarSign,
   Server,
-  KeyRound,
-  CheckCircle,
   ArrowRight,
-  Cpu,
 } from "lucide-react";
 import Link from "next/link";
 import {
@@ -30,7 +26,9 @@ import {
   YAxis,
   CartesianGrid,
 } from "recharts";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { currentRole } from "@/lib/api";
+import { roleScopeLabel } from "@/components/auth/RoleGate";
 
 function fmtInt(n?: number) {
   if (n == null) return "0";
@@ -46,6 +44,8 @@ function fmtPct(n?: number) {
 }
 
 export default function DashboardPage() {
+  const [role] = useState<string | null>(() => currentRole());
+
   const statsQ = useStats();
   const providersQ = useProviders();
   const logsQ = useUsage({ limit: 100, offset: 0 });
@@ -77,7 +77,7 @@ export default function DashboardPage() {
       <PageHeader
         code="01 / overview"
         title="Control Plane"
-        description="Real-time signal from the gateway"
+        description={`Real-time signal from the gateway · ${roleScopeLabel(role)}`}
         actions={
           <Button variant="outline" size="sm" asChild>
             <Link href="/analytics">
