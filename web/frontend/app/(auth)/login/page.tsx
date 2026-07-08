@@ -2,8 +2,7 @@
 
 import { useState, useEffect, FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { setCookie } from "cookies-next";
-import { api } from "@/lib/api";
+import { api, persistAuthSession } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -56,12 +55,7 @@ export default function LoginPage() {
       if (res.status === "success" && res.token) {
         sessionStorage.removeItem("tenant_login_token");
         sessionStorage.removeItem("tenant_options");
-        setCookie("auth_token", res.token, {
-          maxAge: 86400,
-          path: "/",
-          secure: process.env.NODE_ENV === "production",
-          sameSite: "strict",
-        });
+        persistAuthSession(res.token, res.tenant);
         router.push("/dashboard");
       } else if (res.status === "tenant_selection_required") {
         sessionStorage.setItem("tenant_login_token", res.login_token);

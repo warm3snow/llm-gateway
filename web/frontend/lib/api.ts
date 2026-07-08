@@ -15,12 +15,31 @@ import type {
   TenantUsersResponse,
   Tenant,
   TenantUser,
+  TenantMembership,
 } from './types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
+const AUTH_COOKIE = 'auth_token';
+const TENANT_COOKIE = 'current_tenant';
+
+const sessionCookieOptions = {
+  maxAge: 86400,
+  path: '/',
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: 'strict' as const,
+};
+
+export function persistAuthSession(token: string, tenant?: TenantMembership) {
+  setCookie(AUTH_COOKIE, token, sessionCookieOptions);
+  if (tenant) {
+    setCookie(TENANT_COOKIE, JSON.stringify(tenant), sessionCookieOptions);
+  } else {
+    deleteCookie(TENANT_COOKIE, { path: '/' });
+  }
+}
 
 async function apiFetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  const token = getCookie('auth_token');
+  const token = getCookie(AUTH_COOKIE);
   const authHeaders: Record<string, string> = {
     'Content-Type': 'application/json',
   };
@@ -57,7 +76,8 @@ export const api = {
       body: JSON.stringify(data),
     }),
   logout: () => {
-    deleteCookie('auth_token', { path: '/' });
+    deleteCookie(AUTH_COOKIE, { path: '/' });
+    deleteCookie(TENANT_COOKIE, { path: '/' });
     if (typeof window !== 'undefined') {
       window.location.href = '/login';
     }
@@ -187,27 +207,67 @@ export const api = {
 // currentRole decodes the (unverified) JWT payload to read the user's role.
 // This is UI-only gating; the backend independently enforces authorization.
 function currentPayload(): Record<string, unknown> | null {
-  const token = getCookie('auth_token');
+  const token = getCookie(AUTH_COOKIE);
   if (!token || typeof token !== 'string') return null;
   const parts = token.split('.');
   if (parts.length < 2) return null;
   try {
-    return JSON.parse(
-      atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'))
-    ) as Record<string, unknown>;
+    const payload = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = payload.padEnd(payload.length + ((4 - (payload.length % 4)) % 4), '=');
+    return JSON.parse(atob(padded)) as Record<string, unknown>;
   } catch {
     return null;
   }
 }
 
+export function currentUser(): {
+  username: string;
+  email?: string;
+  role?: string;
+  tenant_id?: number;
+} | null {
+  const payload = currentPayload();
+  const username = payload?.username;
+  if (typeof username !== 'string' || !username) return null;
+  const email = payload.email;
+  const role = payload.role;
+  const tenantId = payload.tenant_id;
+  return {
+    username,
+    email: typeof email === 'string' ? email : undefined,
+    role: typeof role === 'string' ? role : undefined,
+    tenant_id: typeof tenantId === 'number' ? tenantId : undefined,
+  };
+}
+
 export function currentRole(): string | null {
-  const role = currentPayload()?.role;
-  return typeof role === 'string' ? role : null;
+  return currentUser()?.role ?? null;
 }
 
 export function currentTenantId(): number | null {
-  const tenantId = currentPayload()?.tenant_id;
-  return typeof tenantId === 'number' ? tenantId : null;
+  return currentUser()?.tenant_id ?? null;
+}
+
+export function currentTenant(): TenantMembership | null {
+  const rawTenant = getCookie(TENANT_COOKIE);
+  if (!rawTenant || typeof rawTenant !== 'string') return null;
+  try {
+    const tenant = JSON.parse(rawTenant) as TenantMembership;
+    const tenantId = currentTenantId();
+    if (
+      typeof tenant.tenant_id !== 'number' ||
+      typeof tenant.name !== 'string' ||
+      typeof tenant.slug !== 'string' ||
+      typeof tenant.role !== 'string' ||
+      typeof tenant.status !== 'string' ||
+      (tenantId != null && tenant.tenant_id !== tenantId)
+    ) {
+      return null;
+    }
+    return tenant;
+  } catch {
+    return null;
+  }
 }
 
 export const queryClient = new QueryClient({

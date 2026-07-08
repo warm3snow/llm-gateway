@@ -18,7 +18,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { api } from "@/lib/api";
+import { api, currentTenant, currentUser } from "@/lib/api";
 
 const segmentLabels: Record<string, string> = {
   dashboard: "dashboard",
@@ -40,6 +40,13 @@ export default function TopBar({
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [changingPassword, setChangingPassword] = useState(false);
+  const [session] = useState(() => ({ user: currentUser(), tenant: currentTenant() }));
+  const username = session.user?.username ?? "unknown";
+  const avatarLabel = username.slice(0, 2).toLowerCase() || "--";
+  const tenantLabel = session.tenant?.name ?? (session.user?.tenant_id != null ? `tenant #${session.user.tenant_id}` : "platform");
+  const tenantMeta = session.tenant
+    ? `${session.tenant.slug} · ${session.tenant.role}`
+    : session.user?.role;
   useEffect(() => setMounted(true), []);
 
   // Build breadcrumb segments
@@ -142,16 +149,21 @@ export default function TopBar({
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
-              className="flex h-8 items-center gap-2 rounded-sm border border-border bg-card/60 px-1.5 py-1 transition-colors hover:border-border-bright"
+              className="flex h-9 items-center gap-2 rounded-sm border border-border bg-card/60 px-1.5 py-1 transition-colors hover:border-border-bright"
               aria-label="User menu"
             >
               <Avatar className="h-6 w-6">
                 <AvatarFallback className="bg-primary/10 font-mono text-[10px] text-primary">
-                  ad
+                  {avatarLabel}
                 </AvatarFallback>
               </Avatar>
-              <span className="hidden font-mono text-[11px] text-muted-foreground sm:inline">
-                admin
+              <span className="hidden flex-col items-start leading-none sm:flex">
+                <span className="font-mono text-[11px] text-foreground">
+                  {username}
+                </span>
+                <span className="mt-0.5 max-w-28 truncate font-mono text-[9px] text-muted-foreground">
+                  {tenantLabel}
+                </span>
               </span>
             </button>
           </DropdownMenuTrigger>
@@ -159,8 +171,16 @@ export default function TopBar({
             <DropdownMenuLabel className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
               session
             </DropdownMenuLabel>
-            <DropdownMenuLabel className="font-sans text-sm text-foreground">
-              admin
+            <DropdownMenuLabel className="space-y-1 font-sans text-sm text-foreground">
+              <div>{username}</div>
+              <div className="font-mono text-[11px] font-normal text-muted-foreground">
+                {tenantLabel}
+              </div>
+              {tenantMeta && (
+                <div className="font-mono text-[10px] font-normal text-muted-foreground/70">
+                  {tenantMeta}
+                </div>
+              )}
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <form

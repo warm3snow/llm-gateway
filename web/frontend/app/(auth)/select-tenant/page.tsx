@@ -2,9 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { setCookie } from "cookies-next";
 import { Building2, ChevronRight, ShieldCheck } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, persistAuthSession } from "@/lib/api";
 import type { TenantMembership } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 
@@ -60,12 +59,7 @@ export default function SelectTenantPage() {
       });
       sessionStorage.removeItem("tenant_login_token");
       sessionStorage.removeItem("tenant_options");
-      setCookie("auth_token", res.token, {
-        maxAge: 86400,
-        path: "/",
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "strict",
-      });
+      persistAuthSession(res.token, res.tenant);
       router.push("/dashboard");
     } catch (err) {
       setError(err instanceof Error ? err.message : "failed to select tenant");
