@@ -5,250 +5,249 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/warm3snow/llm-gateway/internal/types"
 )
 
-// Guardrail 安全护栏接口
+// Guardrail validates model requests and responses.
 type Guardrail interface {
-	// GetName 获取护栏名称
 	GetName() string
-
-	// ValidateRequest 验证请求
-	ValidateRequest(req interface{}) (*types.GuardrailResult, error)
-
-	// ValidateResponse 验证响应
-	ValidateResponse(resp interface{}) (*types.GuardrailResult, error)
+	ValidateRequest(req any) (*types.GuardrailResult, error)
+	ValidateResponse(resp any) (*types.GuardrailResult, error)
 }
 
-// GuardrailResult 护栏验证结果
-type GuardrailResult struct {
-	Passed  bool     `json:"passed"`
-	Message string   `json:"message,omitempty"`
-	Reason  string   `json:"reason,omitempty"`
-	Actions []string `json:"actions,omitempty"`
-}
-
-// GuardrailConfig 护栏配置
-type GuardrailConfig struct {
-	Name       string                 `json:"name"`
-	Type       string                 `json:"type"`
-	Enabled    bool                   `json:"enabled"`
-	Parameters map[string]interface{} `json:"parameters"`
-	Deny       bool                   `json:"deny"`
-	OnFailure  string                 `json:"onFailure"`
-}
-
-// GuardrailManager 护栏管理器
 type GuardrailManager struct {
-	Guardrails []Guardrail       `json:"guardrails"`
-	Configs    []GuardrailConfig `json:"configs"`
+	enabled    bool
+	guardrails []Guardrail
 }
 
-// NewGuardrailManager 创建护栏管理器
-func NewGuardrailManager() *GuardrailManager {
-	return &GuardrailManager{
-		Guardrails: make([]Guardrail, 0),
-		Configs:    make([]GuardrailConfig, 0),
+func NewGuardrailManager(enabled ...bool) *GuardrailManager {
+	isEnabled := true
+	if len(enabled) > 0 {
+		isEnabled = enabled[0]
 	}
+	return &GuardrailManager{enabled: isEnabled, guardrails: []Guardrail{}}
 }
 
-// RegisterGuardrail 注册护栏
+func NewManagerFromConfig(enabled bool, configs []types.GuardrailConfig) (*GuardrailManager, error) {
+	manager := NewGuardrailManager(enabled)
+	if !enabled {
+		return manager, nil
+	}
+
+	for _, cfg := range configs {
+		if strings.EqualFold(cfg.OnFailure, "allow") || strings.EqualFold(cfg.OnFailure, "warn") {
+			continue
+		}
+
+		switch strings.ToLower(strings.TrimSpace(cfg.Type)) {
+		case "pii", "pii_detector":
+			manager.RegisterGuardrail(NewPIIDetector())
+		case "keyword", "keyword_filter":
+			keywords := stringSliceParam(cfg.Parameters, "keywords")
+			matchMode := stringParam(cfg.Parameters, "matchMode", "contains")
+			caseSensitive := boolParam(cfg.Parameters, "caseSensitive", false)
+			manager.RegisterGuardrail(NewKeywordFilter(keywords, matchMode, caseSensitive))
+		case "length", "length_limiter":
+			maxInput := intParam(cfg.Parameters, "maxInputLength", 0)
+			maxOutput := intParam(cfg.Parameters, "maxOutputLength", 0)
+			manager.RegisterGuardrail(NewLengthLimiter(maxInput, maxOutput))
+		case "":
+			return nil, fmt.Errorf("guardrail type is required")
+		default:
+			return nil, fmt.Errorf("unsupported guardrail type: %s", cfg.Type)
+		}
+	}
+
+	return manager, nil
+}
+
+func (m *GuardrailManager) Enabled() bool {
+	return m != nil && m.enabled
+}
+
+func (m *GuardrailManager) Empty() bool {
+	return m == nil || len(m.guardrails) == 0
+}
+
 func (m *GuardrailManager) RegisterGuardrail(g Guardrail) {
-	m.Guardrails = append(m.Guardrails, g)
+	if g == nil {
+		return
+	}
+	m.guardrails = append(m.guardrails, g)
 }
 
-// AddConfig 添加配置
-func (m *GuardrailManager) AddConfig(cfg GuardrailConfig) {
-	m.Configs = append(m.Configs, cfg)
-}
-
-// ValidateRequest 验证请求
-func (m *GuardrailManager) ValidateRequest(req interface{}) (*types.GuardrailResult, error) {
-	for _, g := range m.Guardrails {
+func (m *GuardrailManager) ValidateRequest(req any) (*types.GuardrailResult, error) {
+	if !m.Enabled() || m.Empty() {
+		return &types.GuardrailResult{Passed: true}, nil
+	}
+	for _, g := range m.guardrails {
 		result, err := g.ValidateRequest(req)
 		if err != nil {
 			return nil, err
 		}
-
-		if !result.Passed {
+		if result != nil && !result.Passed {
+			if result.Message == "" {
+				result.Message = "Request blocked by guardrail"
+			}
+			if result.Reason != "" {
+				result.Reason = g.GetName() + ": " + result.Reason
+			}
 			return result, nil
 		}
 	}
-
 	return &types.GuardrailResult{Passed: true}, nil
 }
 
-// ValidateResponse 验证响应
-func (m *GuardrailManager) ValidateResponse(resp interface{}) (*types.GuardrailResult, error) {
-	for _, g := range m.Guardrails {
+func (m *GuardrailManager) ValidateResponse(resp any) (*types.GuardrailResult, error) {
+	if !m.Enabled() || m.Empty() {
+		return &types.GuardrailResult{Passed: true}, nil
+	}
+	for _, g := range m.guardrails {
 		result, err := g.ValidateResponse(resp)
 		if err != nil {
 			return nil, err
 		}
-
-		if !result.Passed {
+		if result != nil && !result.Passed {
+			if result.Message == "" {
+				result.Message = "Response blocked by guardrail"
+			}
+			if result.Reason != "" {
+				result.Reason = g.GetName() + ": " + result.Reason
+			}
 			return result, nil
 		}
 	}
-
 	return &types.GuardrailResult{Passed: true}, nil
 }
 
-// PIIDetector PII 检测器
 type PIIDetector struct {
-	Name     string
-	Patterns map[string]*regexp.Regexp
+	Name        string
+	patterns    map[string]*regexp.Regexp
+	maskEnabled bool
+	maskChar    rune
 }
 
-// NewPIIDetector 创建 PII 检测器
 func NewPIIDetector() *PIIDetector {
 	return &PIIDetector{
-		Name: "pii-detector",
-		Patterns: map[string]*regexp.Regexp{
+		Name: "pii_detector",
+		patterns: map[string]*regexp.Regexp{
 			"email":     regexp.MustCompile(`[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}`),
-			"phone":     regexp.MustCompile(`(\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3,4}[-.\s]?\d{4}`),
-			"id_card":   regexp.MustCompile(`\d{17}[\dXx]`),
-			"passport":  regexp.MustCompile(`[EGDSMP]\d{8}`),
-			"bank_card": regexp.MustCompile(`\d{16,19}`),
+			"phone":     regexp.MustCompile(`(1[3-9]\d{9}|\+86[1-9]\d{10})`),
+			"id_card":   regexp.MustCompile(`[1-9]\d{5}(18|19|20)\d{2}(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])\d{3}[\dXx]`),
+			"bank_card": regexp.MustCompile(`(4[0-9]{12,15}|5[1-5][0-9]{14}|3[47][0-9]{13}|3[0,6,8][0-9]{12}|6(?:011|5[0-9][0-9])[0-9]{12})`),
 		},
+		maskEnabled: true,
+		maskChar:    '*',
 	}
 }
 
-// GetName 获取名称
-func (d *PIIDetector) GetName() string {
-	return d.Name
+func (d *PIIDetector) GetName() string { return d.Name }
+
+func (d *PIIDetector) ValidateRequest(req any) (*types.GuardrailResult, error) {
+	return d.validate(req, "PII detected in request")
 }
 
-// ValidateRequest 验证请求
-func (d *PIIDetector) ValidateRequest(req interface{}) (*types.GuardrailResult, error) {
-	// 将请求转换为字符串
-	reqStr, err := toJSONString(req)
+func (d *PIIDetector) ValidateResponse(resp any) (*types.GuardrailResult, error) {
+	return d.validate(resp, "PII detected in response")
+}
+
+func (d *PIIDetector) validate(value any, message string) (*types.GuardrailResult, error) {
+	text, err := toJSONString(value)
 	if err != nil {
 		return nil, err
 	}
-
-	// 检测 PII
-	detected := d.detectPII(reqStr)
-
-	if len(detected) > 0 {
-		return &types.GuardrailResult{
-			Passed:  false,
-			Message: "PII detected in request",
-			Reason:  fmt.Sprintf("Detected PII types: %s", strings.Join(detected, ", ")),
-			Actions: []string{"mask", "deny"},
-		}, nil
-	}
-
-	return &types.GuardrailResult{Passed: true}, nil
-}
-
-// ValidateResponse 验证响应
-func (d *PIIDetector) ValidateResponse(resp interface{}) (*types.GuardrailResult, error) {
-	respStr, err := toJSONString(resp)
-	if err != nil {
-		return nil, err
-	}
-
-	detected := d.detectPII(respStr)
-
-	if len(detected) > 0 {
-		return &types.GuardrailResult{
-			Passed:  false,
-			Message: "PII detected in response",
-			Reason:  fmt.Sprintf("Detected PII types: %s", strings.Join(detected, ", ")),
-			Actions: []string{"mask", "deny"},
-		}, nil
-	}
-
-	return &types.GuardrailResult{Passed: true}, nil
-}
-
-// detectPII 检测 PII
-func (d *PIIDetector) detectPII(text string) []string {
 	detected := make([]string, 0)
-
-	for piiType, pattern := range d.Patterns {
+	for name, pattern := range d.patterns {
 		if pattern.MatchString(text) {
-			detected = append(detected, piiType)
+			detected = append(detected, name)
 		}
 	}
-
-	return detected
+	if len(detected) == 0 {
+		return &types.GuardrailResult{Passed: true}, nil
+	}
+	result := &types.GuardrailResult{
+		Passed:  false,
+		Message: message,
+		Reason:  fmt.Sprintf("detected PII types: %s", strings.Join(detected, ", ")),
+		Actions: []string{"deny"},
+	}
+	if d.maskEnabled {
+		result.Actions = append(result.Actions, "mask")
+		result.MaskedContent = d.maskContent(text, detected)
+	}
+	return result, nil
 }
 
-// KeywordFilter 关键词过滤器
+func (d *PIIDetector) maskContent(text string, detected []string) string {
+	masked := text
+	for _, name := range detected {
+		pattern := d.patterns[name]
+		masked = pattern.ReplaceAllStringFunc(masked, func(match string) string {
+			return strings.Repeat(string(d.maskChar), utf8.RuneCountInString(match))
+		})
+	}
+	return masked
+}
+
 type KeywordFilter struct {
 	Name          string
 	Keywords      []string
-	MatchMode     string // contains, exact, regex
+	MatchMode     string
 	CaseSensitive bool
 }
 
-// NewKeywordFilter 创建关键词过滤器
 func NewKeywordFilter(keywords []string, matchMode string, caseSensitive bool) *KeywordFilter {
+	matchMode = strings.ToLower(strings.TrimSpace(matchMode))
+	if matchMode == "" {
+		matchMode = "contains"
+	}
 	return &KeywordFilter{
-		Name:          "keyword-filter",
+		Name:          "keyword_filter",
 		Keywords:      keywords,
 		MatchMode:     matchMode,
 		CaseSensitive: caseSensitive,
 	}
 }
 
-// GetName 获取名称
-func (f *KeywordFilter) GetName() string {
-	return f.Name
+func (f *KeywordFilter) GetName() string { return f.Name }
+
+func (f *KeywordFilter) ValidateRequest(req any) (*types.GuardrailResult, error) {
+	return f.validate(req, "Blocked keywords detected in request")
 }
 
-// ValidateRequest 验证请求
-func (f *KeywordFilter) ValidateRequest(req interface{}) (*types.GuardrailResult, error) {
-	reqStr, err := toJSONString(req)
+func (f *KeywordFilter) ValidateResponse(resp any) (*types.GuardrailResult, error) {
+	return f.validate(resp, "Blocked keywords detected in response")
+}
+
+func (f *KeywordFilter) validate(value any, message string) (*types.GuardrailResult, error) {
+	text, err := toJSONString(value)
 	if err != nil {
 		return nil, err
 	}
-
-	matched := f.matchKeywords(reqStr)
-
-	if matched {
-		return &types.GuardrailResult{
-			Passed:  false,
-			Message: "Blocked keywords detected in request",
-			Reason:  "Request contains blocked keywords",
-			Actions: []string{"deny"},
-		}, nil
-	}
-
-	return &types.GuardrailResult{Passed: true}, nil
-}
-
-// ValidateResponse 验证响应
-func (f *KeywordFilter) ValidateResponse(resp interface{}) (*types.GuardrailResult, error) {
-	respStr, err := toJSONString(resp)
+	matched, err := f.matchKeywords(text)
 	if err != nil {
 		return nil, err
 	}
-
-	matched := f.matchKeywords(respStr)
-
-	if matched {
-		return &types.GuardrailResult{
-			Passed:  false,
-			Message: "Blocked keywords detected in response",
-			Reason:  "Response contains blocked keywords",
-			Actions: []string{"deny", "replace"},
-		}, nil
+	if len(matched) == 0 {
+		return &types.GuardrailResult{Passed: true}, nil
 	}
-
-	return &types.GuardrailResult{Passed: true}, nil
+	return &types.GuardrailResult{
+		Passed:  false,
+		Message: message,
+		Reason:  fmt.Sprintf("matched blocked keywords: %s", strings.Join(matched, ", ")),
+		Actions: []string{"deny"},
+	}, nil
 }
 
-// matchKeywords 匹配关键词
-func (f *KeywordFilter) matchKeywords(text string) bool {
+func (f *KeywordFilter) matchKeywords(text string) ([]string, error) {
 	searchText := text
 	if !f.CaseSensitive {
 		searchText = strings.ToLower(text)
 	}
 
+	matched := make([]string, 0)
 	for _, keyword := range f.Keywords {
 		searchKeyword := keyword
 		if !f.CaseSensitive {
@@ -258,86 +257,77 @@ func (f *KeywordFilter) matchKeywords(text string) bool {
 		switch f.MatchMode {
 		case "contains":
 			if strings.Contains(searchText, searchKeyword) {
-				return true
+				matched = append(matched, keyword)
 			}
 		case "exact":
 			if searchText == searchKeyword {
-				return true
+				matched = append(matched, keyword)
 			}
 		case "regex":
-			if matched, _ := regexp.MatchString(searchKeyword, searchText); matched {
-				return true
+			ok, err := regexp.MatchString(searchKeyword, searchText)
+			if err != nil {
+				return nil, err
 			}
+			if ok {
+				matched = append(matched, keyword)
+			}
+		default:
+			return nil, fmt.Errorf("unsupported keyword match mode: %s", f.MatchMode)
 		}
 	}
-
-	return false
+	return matched, nil
 }
 
-// LengthLimiter 长度限制器
 type LengthLimiter struct {
 	Name            string
 	MaxInputLength  int
 	MaxOutputLength int
 }
 
-// NewLengthLimiter 创建长度限制器
 func NewLengthLimiter(maxInput, maxOutput int) *LengthLimiter {
-	return &LengthLimiter{
-		Name:            "length-limiter",
-		MaxInputLength:  maxInput,
-		MaxOutputLength: maxOutput,
-	}
+	return &LengthLimiter{Name: "length_limiter", MaxInputLength: maxInput, MaxOutputLength: maxOutput}
 }
 
-// GetName 获取名称
-func (l *LengthLimiter) GetName() string {
-	return l.Name
-}
+func (l *LengthLimiter) GetName() string { return l.Name }
 
-// ValidateRequest 验证请求
-func (l *LengthLimiter) ValidateRequest(req interface{}) (*types.GuardrailResult, error) {
-	reqStr, err := toJSONString(req)
+func (l *LengthLimiter) ValidateRequest(req any) (*types.GuardrailResult, error) {
+	text, err := toJSONString(req)
 	if err != nil {
 		return nil, err
 	}
-
-	if len(reqStr) > l.MaxInputLength {
+	if l.MaxInputLength > 0 && utf8.RuneCountInString(text) > l.MaxInputLength {
 		return &types.GuardrailResult{
 			Passed:  false,
 			Message: "Request too long",
-			Reason:  fmt.Sprintf("Request length %d exceeds maximum %d", len(reqStr), l.MaxInputLength),
-			Actions: []string{"truncate", "deny"},
+			Reason:  fmt.Sprintf("request length %d exceeds maximum %d", utf8.RuneCountInString(text), l.MaxInputLength),
+			Actions: []string{"deny"},
 		}, nil
 	}
-
 	return &types.GuardrailResult{Passed: true}, nil
 }
 
-// ValidateResponse 验证响应
-func (l *LengthLimiter) ValidateResponse(resp interface{}) (*types.GuardrailResult, error) {
-	respStr, err := toJSONString(resp)
+func (l *LengthLimiter) ValidateResponse(resp any) (*types.GuardrailResult, error) {
+	text, err := toJSONString(resp)
 	if err != nil {
 		return nil, err
 	}
-
-	if len(respStr) > l.MaxOutputLength {
+	if l.MaxOutputLength > 0 && utf8.RuneCountInString(text) > l.MaxOutputLength {
 		return &types.GuardrailResult{
 			Passed:  false,
 			Message: "Response too long",
-			Reason:  fmt.Sprintf("Response length %d exceeds maximum %d", len(respStr), l.MaxOutputLength),
-			Actions: []string{"truncate", "deny"},
+			Reason:  fmt.Sprintf("response length %d exceeds maximum %d", utf8.RuneCountInString(text), l.MaxOutputLength),
+			Actions: []string{"deny"},
 		}, nil
 	}
-
 	return &types.GuardrailResult{Passed: true}, nil
 }
 
-// toJSONString 转换为 JSON 字符串
-func toJSONString(v interface{}) (string, error) {
+func toJSONString(v any) (string, error) {
 	switch val := v.(type) {
 	case string:
 		return val, nil
+	case []byte:
+		return string(val), nil
 	default:
 		bytes, err := json.Marshal(v)
 		if err != nil {
@@ -347,7 +337,75 @@ func toJSONString(v interface{}) (string, error) {
 	}
 }
 
-// 注册默认护栏
-func init() {
-	// 可以在这里注册全局默认的护栏
+func stringParam(params map[string]any, key, fallback string) string {
+	if params == nil {
+		return fallback
+	}
+	if value, ok := params[key].(string); ok && value != "" {
+		return value
+	}
+	return fallback
+}
+
+func boolParam(params map[string]any, key string, fallback bool) bool {
+	if params == nil {
+		return fallback
+	}
+	if value, ok := params[key].(bool); ok {
+		return value
+	}
+	return fallback
+}
+
+func intParam(params map[string]any, key string, fallback int) int {
+	if params == nil {
+		return fallback
+	}
+	switch value := params[key].(type) {
+	case int:
+		return value
+	case int64:
+		return int(value)
+	case float64:
+		return int(value)
+	case json.Number:
+		parsed, err := value.Int64()
+		if err == nil {
+			return int(parsed)
+		}
+	}
+	return fallback
+}
+
+func stringSliceParam(params map[string]any, key string) []string {
+	if params == nil {
+		return nil
+	}
+	switch values := params[key].(type) {
+	case []string:
+		return values
+	case []any:
+		out := make([]string, 0, len(values))
+		for _, item := range values {
+			if value, ok := item.(string); ok {
+				out = append(out, value)
+			}
+		}
+		return out
+	case string:
+		if values == "" {
+			return nil
+		}
+		parts := strings.Split(values, ",")
+		out := make([]string, 0, len(parts))
+		for _, part := range parts {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				out = append(out, part)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }

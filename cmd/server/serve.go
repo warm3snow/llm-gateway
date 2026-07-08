@@ -41,6 +41,7 @@ import (
 	"github.com/warm3snow/llm-gateway/internal/types"
 	"github.com/warm3snow/llm-gateway/pkg/cache"
 	"github.com/warm3snow/llm-gateway/pkg/encryption"
+	"github.com/warm3snow/llm-gateway/pkg/guardrail"
 	"github.com/warm3snow/llm-gateway/pkg/proxy"
 )
 
@@ -188,8 +189,19 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// 日志输出已注册的提供商
 	log.Printf("[PROVIDER] Registered providers: %v", provider.GetGlobalFactory().ListProviders())
 
+	// 创建 Guardrail 管理器
+	var guardrailConfigs []types.GuardrailConfig
+	if cfg.Gateway.DefaultConfig != nil {
+		guardrailConfigs = cfg.Gateway.DefaultConfig.Guardrails
+	}
+	guardrailManager, err := guardrail.NewManagerFromConfig(cfg.Gateway.GuardrailsEnabled, guardrailConfigs)
+	if err != nil {
+		return fmt.Errorf("failed to initialize guardrails: %w", err)
+	}
+
 	// 创建代理处理器
 	proxyHandler := proxy.NewProxyHandler(cfg, cacheInstance)
+	proxyHandler.SetGuardrailManager(guardrailManager)
 
 	// VirtualKeyService for budget tracking on usage records.
 	virtualKeyService := service.NewVirtualKeyService()
@@ -197,6 +209,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// API 路由（需要虚拟密钥认证 + 缓存 + 用量记录）
 	v1 := router.Group("/v1")
 	v1.Use(middleware.VirtualKeyAuth(cfg))
+	v1.Use(middleware.GuardrailMiddleware(guardrailManager))
 	v1.Use(middleware.UsageRecordMiddleware(cfg, virtualKeyService))
 	v1.Use(middleware.CacheMiddleware(cacheInstance))
 	{

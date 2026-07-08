@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	pathpkg "path"
 	"strings"
 	"time"
 
@@ -17,17 +18,19 @@ import (
 	"github.com/warm3snow/llm-gateway/internal/service"
 	"github.com/warm3snow/llm-gateway/internal/types"
 	"github.com/warm3snow/llm-gateway/pkg/cache"
+	"github.com/warm3snow/llm-gateway/pkg/guardrail"
 	"github.com/warm3snow/llm-gateway/pkg/retry"
 )
 
 // ProxyHandler 代理处理器
 type ProxyHandler struct {
-	Config          *config.Config
-	ProviderFactory *provider.ProviderFactory
-	Retryer         *retry.Retryer
-	Cache           cache.Cache
-	ModelSelector   *service.ModelSelector
-	ModelTracker    *service.ModelConcurrencyTracker
+	Config           *config.Config
+	ProviderFactory  *provider.ProviderFactory
+	Retryer          *retry.Retryer
+	Cache            cache.Cache
+	ModelSelector    *service.ModelSelector
+	ModelTracker     *service.ModelConcurrencyTracker
+	GuardrailManager *guardrail.GuardrailManager
 }
 
 // NewProxyHandler 创建代理处理器
@@ -41,6 +44,10 @@ func NewProxyHandler(cfg *config.Config, c cache.Cache) *ProxyHandler {
 		ModelSelector:   service.NewModelSelector(cfg, tracker),
 		ModelTracker:    tracker,
 	}
+}
+
+func (h *ProxyHandler) SetGuardrailManager(manager *guardrail.GuardrailManager) {
+	h.GuardrailManager = manager
 }
 
 // HandleChatCompletion 处理聊天补全请求
@@ -241,6 +248,22 @@ func (h *ProxyHandler) handleResponse(c *gin.Context, resp *http.Response) {
 		return
 	}
 
+	if h.shouldApplyResponseGuardrail(c, resp.StatusCode) {
+		result, err := h.GuardrailManager.ValidateResponse(string(body))
+		if err != nil {
+			h.abortWithError(c, http.StatusInternalServerError, "guardrail_error", "Guardrail validation failed")
+			return
+		}
+		if result != nil && !result.Passed {
+			c.AbortWithStatusJSON(http.StatusForbidden, types.ErrorResponse{
+				Message: "Response blocked by guardrail",
+				Type:    "guardrail_error",
+				Code:    "guardrail_blocked",
+			})
+			return
+		}
+	}
+
 	// 设置响应头
 	for key, values := range resp.Header {
 		for _, value := range values {
@@ -253,6 +276,28 @@ func (h *ProxyHandler) handleResponse(c *gin.Context, resp *http.Response) {
 
 	// 写入响应体
 	c.Writer.Write(body)
+}
+
+func (h *ProxyHandler) shouldApplyResponseGuardrail(c *gin.Context, status int) bool {
+	if h.GuardrailManager == nil || !h.GuardrailManager.Enabled() || h.GuardrailManager.Empty() {
+		return false
+	}
+	if c.Request.Method != http.MethodPost || status < 200 || status >= 300 {
+		return false
+	}
+	switch guardrailEndpointPath(c.Request.URL.Path) {
+	case "/chat/completions", "/completions":
+		return true
+	default:
+		return false
+	}
+}
+
+func guardrailEndpointPath(path string) string {
+	path = strings.TrimPrefix(path, "/v1")
+	path = strings.TrimPrefix(path, "/proxy")
+	path = "/" + strings.TrimLeft(path, "/")
+	return pathpkg.Clean(path)
 }
 
 // getOptionsFromContext 从请求上下文获取选项
@@ -353,8 +398,8 @@ func (h *ProxyHandler) getTargetURL(c *gin.Context) string {
 		return ""
 	}
 
-	baseURL := prov.GetBaseURL()
-	path := c.Param("path")
+	baseURL := strings.TrimRight(prov.GetBaseURL(), "/")
+	path := strings.TrimLeft(c.Param("path"), "/")
 
 	return baseURL + "/" + path
 }

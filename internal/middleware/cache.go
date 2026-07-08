@@ -55,6 +55,9 @@ func CacheMiddleware(c cache.Cache) gin.HandlerFunc {
 		// Try cache
 		cached, err := c.Get(ctx.Request.Context(), cacheKey)
 		if err == nil && cached != nil {
+			if validateCachedResponseGuardrail(ctx, cached.ResponseText) {
+				return
+			}
 			ctx.Header("x-cache", "HIT")
 			ctx.Data(http.StatusOK, "application/json", []byte(cached.ResponseText))
 			ctx.Abort()
