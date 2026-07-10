@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -72,7 +73,7 @@ func newGatewayRouterWithCache(t *testing.T, cfg *config.Config, c gatewaycache.
 	v1 := router.Group("/v1")
 	v1.Use(middleware.VirtualKeyAuth(cfg))
 	v1.Use(middleware.UsageRecordMiddleware(cfg, virtualKeyService))
-	v1.Use(middleware.CacheMiddleware(c))
+	v1.Use(middleware.CacheMiddleware(c, time.Minute, cfg.Gateway.DefaultProvider))
 	v1.POST("/chat/completions", proxyHandler.HandleChatCompletion)
 	return router
 }

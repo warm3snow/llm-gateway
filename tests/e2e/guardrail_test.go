@@ -82,7 +82,7 @@ func newGuardrailRouter(t *testing.T, cfg *config.Config, c gatewaycache.Cache) 
 	v1.Use(middleware.VirtualKeyAuth(cfg))
 	v1.Use(middleware.GuardrailMiddleware(manager))
 	v1.Use(middleware.UsageRecordMiddleware(cfg, virtualKeyService))
-	v1.Use(middleware.CacheMiddleware(c))
+	v1.Use(middleware.CacheMiddleware(c, time.Minute, cfg.Gateway.DefaultProvider))
 	v1.POST("/chat/completions", proxyHandler.HandleChatCompletion)
 	v1.POST("/completions", proxyHandler.HandleCompletion)
 	v1.POST("/embeddings", proxyHandler.HandleEmbedding)
@@ -302,12 +302,12 @@ func TestGuardrailValidatesCachedChatCompletionResponse(t *testing.T) {
 	var requestBody bytes.Buffer
 	require.NoError(t, json.NewEncoder(&requestBody).Encode(body))
 	bodyBytes := requestBody.Bytes()
-	cacheKey := guardrailE2ECacheKey("", "gpt-test", bodyBytes)
+	cacheKey := guardrailE2ECacheKey("openai", "gpt-test", bodyBytes)
 	require.NoError(t, cacheInstance.Set(context.Background(), cacheKey, &gatewaycache.CacheEntry{
 		Key:          cacheKey,
 		RequestText:  string(bodyBytes),
 		ResponseText: `{"id":"chatcmpl-e2e","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"cached-blocked response"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":4,"total_tokens":7}}`,
-		Provider:     "",
+		Provider:     "openai",
 		Model:        "gpt-test",
 		ExpiresAt:    time.Now().Add(time.Minute),
 	}, time.Minute))

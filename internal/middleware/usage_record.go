@@ -30,6 +30,8 @@ type streamUsage struct {
 	TotalTokens      int `json:"total_tokens"`
 }
 
+var defaultPricingCache = newPricingCache(5*time.Minute, 30*time.Second)
+
 // responseBodyWriter wraps gin.ResponseWriter to capture the response body and status code.
 type responseBodyWriter struct {
 	gin.ResponseWriter
@@ -58,6 +60,10 @@ func (w *responseBodyWriter) WriteHeader(status int) {
 // the virtual key's budget_used column via TrackUsage, establishing the
 // token→budget conversion for every recorded invocation.
 func UsageRecordMiddleware(cfg *config.Config, virtualKeyService *service.VirtualKeyService) gin.HandlerFunc {
+	return UsageRecordMiddlewareWithBudgetTracker(cfg, virtualKeyService, nil)
+}
+
+func UsageRecordMiddlewareWithBudgetTracker(cfg *config.Config, virtualKeyService *service.VirtualKeyService, budgetTracker *service.BudgetTracker) gin.HandlerFunc {
 	defaultProvider := "openai"
 	if cfg != nil && cfg.Gateway.DefaultProvider != "" {
 		defaultProvider = cfg.Gateway.DefaultProvider
@@ -84,8 +90,21 @@ func UsageRecordMiddleware(cfg *config.Config, virtualKeyService *service.Virtua
 			status:         http.StatusOK,
 		}
 		c.Writer = writer
+		preWorkElapsed := time.Since(start)
 
 		c.Next()
+
+		postWorkStart := time.Now()
+		recordedMiddlewareMetrics := false
+		recordMiddlewareMetrics := func() {
+			if recordedMiddlewareMetrics {
+				return
+			}
+			recordedMiddlewareMetrics = true
+			endpointLabel := middlewareMetricEndpoint(c)
+			metrics.RecordUsageMiddleware(endpointLabel, writer.status, preWorkElapsed+time.Since(postWorkStart))
+			metrics.RecordUsageBodySizes(endpointLabel, len(requestBody), writer.body.Len())
+		}
 
 		// Extract provider: selected auto-mode provider > header > config default.
 		provider := c.GetHeader("x-llm-provider")
@@ -134,6 +153,7 @@ func UsageRecordMiddleware(cfg *config.Config, virtualKeyService *service.Virtua
 		// merely hit the route (e.g. GET /v1/models) is skipped.
 		status := writer.status
 		if inputTokens == 0 && outputTokens == 0 && status < 400 {
+			recordMiddlewareMetrics()
 			return
 		}
 
@@ -168,10 +188,13 @@ func UsageRecordMiddleware(cfg *config.Config, virtualKeyService *service.Virtua
 			tenantID = database.DefaultTenantID
 		}
 
-		// Decrement the virtual key's budget synchronously so budgets stay
-		// consistent with the recorded cost.
-		if virtualKeyService != nil && virtualKeyID != nil && cost > 0 {
-			_ = virtualKeyService.TrackUsage(*virtualKeyID, cost)
+		// Apply the virtual key's budget usage. Prefer the async tracker so request
+		// latency is not coupled to the budget UPDATE; fall back to synchronous
+		// TrackUsage if the queue is full or async tracking is not configured.
+		if virtualKeyID != nil && cost > 0 {
+			trackStart := time.Now()
+			trackResult := trackVirtualKeyBudget(*virtualKeyID, cost, virtualKeyService, budgetTracker)
+			metrics.RecordUsageTrackUsage(trackResult, time.Since(trackStart))
 		}
 
 		// Reuse the request-scoped trace ID (set by the Logger middleware) so
@@ -229,7 +252,29 @@ func UsageRecordMiddleware(cfg *config.Config, virtualKeyService *service.Virtua
 		// Persist asynchronously via the buffered writer. This decouples the
 		// request path from DB latency and bounds goroutine growth under load.
 		logstore.Enqueue(&record)
+		recordMiddlewareMetrics()
 	}
+}
+
+func trackVirtualKeyBudget(virtualKeyID uint, cost float64, virtualKeyService *service.VirtualKeyService, budgetTracker *service.BudgetTracker) string {
+	if budgetTracker != nil {
+		if err := budgetTracker.Enqueue(virtualKeyID, cost); err == nil {
+			return "queued"
+		}
+		if virtualKeyService == nil {
+			return "error"
+		}
+		if err := virtualKeyService.TrackUsage(virtualKeyID, cost); err != nil {
+			return "fallback_error"
+		}
+		return "fallback_success"
+	}
+	if virtualKeyService != nil {
+		if err := virtualKeyService.TrackUsage(virtualKeyID, cost); err != nil {
+			return "error"
+		}
+	}
+	return "success"
 }
 
 // truncate caps a string to n bytes to bound stored error message size.
@@ -286,15 +331,57 @@ func parseUsage(body []byte) (inputTokens, outputTokens int) {
 // tokens are billed at the (cheaper) cache-read rate. If cache_read_price is
 // unset (0), we fall back to the normal input price rather than billing input
 // tokens for free.
+func middlewareMetricEndpoint(c *gin.Context) string {
+	if c == nil || c.Request == nil || c.Request.URL == nil {
+		return "unknown"
+	}
+	if fullPath := c.FullPath(); fullPath != "" {
+		return fullPath
+	}
+	if c.Request.URL.Path != "" {
+		return c.Request.URL.Path
+	}
+	return "unknown"
+}
+
 func calculateCost(provider, model string, inputTokens, outputTokens int, cached bool) float64 {
+	start := time.Now()
+	result := "success"
+	defer func() {
+		metrics.RecordUsageCostLookup(provider, model, cached, result, time.Since(start))
+	}()
+
+	if mp, ok := defaultPricingCache.get(provider, model); ok {
+		if mp == nil {
+			result = "missing_pricing_cached"
+			return 0
+		}
+		result = "cache_hit"
+		return calculateCostFromPricing(mp, inputTokens, outputTokens, cached)
+	}
+
 	db := database.GetDB()
 	if db == nil {
+		result = "no_db"
+		defaultPricingCache.put(provider, model, nil)
 		return 0
 	}
 	mp, err := models.GetModelPricing(db, provider, model)
-	if err != nil || mp == nil {
+	if err != nil {
+		result = "lookup_error"
 		return 0
 	}
+	if mp == nil {
+		result = "missing_pricing"
+		defaultPricingCache.put(provider, model, nil)
+		return 0
+	}
+	defaultPricingCache.put(provider, model, mp)
+	result = "loaded"
+	return calculateCostFromPricing(mp, inputTokens, outputTokens, cached)
+}
+
+func calculateCostFromPricing(mp *models.ModelPricing, inputTokens, outputTokens int, cached bool) float64 {
 	inputPrice := mp.InputPrice
 	if cached && mp.CacheReadPrice > 0 {
 		inputPrice = mp.CacheReadPrice

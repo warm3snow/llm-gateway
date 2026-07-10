@@ -41,6 +41,9 @@ func Bootstrap(adminUser, adminPass string) error {
 		}
 		log.Printf("[BOOTSTRAP] Created default tenant (id=%d)", DefaultTenantID)
 	}
+	if err := advanceTenantSequence(); err != nil {
+		return err
+	}
 
 	// 2. Super-admin user from config credentials.
 	var count int64
@@ -67,4 +70,11 @@ func Bootstrap(adminUser, adminPass string) error {
 	}
 
 	return nil
+}
+
+func advanceTenantSequence() error {
+	if DB == nil || DB.Dialector.Name() != "postgres" {
+		return nil
+	}
+	return DB.Exec("SELECT setval(pg_get_serial_sequence('tenants', 'id'), GREATEST((SELECT MAX(id) FROM tenants), 1))").Error
 }

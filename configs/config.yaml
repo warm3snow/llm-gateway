@@ -24,6 +24,19 @@ gateway:
     maxRequestTimeout: 120000
     supportedProviders:
         - ollama
+database:
+    driver: sqlite
+    dsn: llm-gateway.db
+    logLevel: warn
+    maxOpenConns: 50
+    maxIdleConns: 25
+    connMaxLifetime: 30m0s
+budget:
+    asyncEnabled: true
+    queueSize: 10000
+    batchSize: 500
+    flushInterval: 250ms
+    flushTimeout: 5s
 logging:
     level: info
     format: json
@@ -44,3 +57,4 @@ server:
     writeTimeout: 1m0s
     shutdownTimeout: 30s
     mode: debug
+    pprofEnabled: false

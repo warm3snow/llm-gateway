@@ -1,0 +1,52 @@
+cache:
+    enabled: false
+    type: redis
+    defaultTTL: 5m0s
+    redis:
+        addr: localhost:6379
+        password: ""
+        db: 0
+database:
+    driver: postgres
+    dsn: host=localhost user=llm_gateway password=llm_gateway dbname=llm_gateway port=5432 sslmode=disable TimeZone=UTC
+    logLevel: warn
+    maxOpenConns: 40
+    maxIdleConns: 20
+    connMaxLifetime: 30m0s
+budget:
+    asyncEnabled: true
+    queueSize: 20000
+    batchSize: 1000
+    flushInterval: 250ms
+    flushTimeout: 5s
+gateway:
+    defaultProvider: deterministic
+    providers:
+        deterministic:
+            provider: deterministic
+            requestTimeout: 30000
+    guardrailsEnabled: true
+    maxRequestTimeout: 120000
+    supportedProviders:
+        - deterministic
+logging:
+    level: info
+    format: json
+    outputPath: stdout
+security:
+    apiKeyHeader: x-llm-gateway-api-key
+    allowedOrigins:
+        - '*'
+    rateLimitEnabled: false
+    rateLimit: 100
+    adminUser: admin
+    adminPass: admin123
+    jwtSecret: llm-gateway-benchmark-secret-change-me
+server:
+    host: 0.0.0.0
+    port: 8080
+    readTimeout: 1m0s
+    writeTimeout: 1m0s
+    shutdownTimeout: 30s
+    mode: release
+    pprofEnabled: true

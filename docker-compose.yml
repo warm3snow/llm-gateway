@@ -13,9 +13,27 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
       - LLM_GATEWAY_CONFIG_PATH=/app/configs/config.yaml
+      - LLM_GATEWAY_DATABASE_DRIVER=postgres
+      - LLM_GATEWAY_DATABASE_DSN=host=postgres user=llm_gateway password=llm_gateway dbname=llm_gateway port=5432 sslmode=disable TimeZone=UTC
+      - LLM_GATEWAY_DATABASE_MAX_OPEN_CONNS=40
+      - LLM_GATEWAY_DATABASE_MAX_IDLE_CONNS=20
+      - LLM_GATEWAY_DATABASE_CONN_MAX_LIFETIME=30m
+      - LLM_GATEWAY_BUDGET_ASYNC_ENABLED=true
+      - LLM_GATEWAY_BUDGET_QUEUE_SIZE=20000
+      - LLM_GATEWAY_BUDGET_BATCH_SIZE=1000
+      - LLM_GATEWAY_BUDGET_FLUSH_INTERVAL=250ms
+      - LLM_GATEWAY_BUDGET_FLUSH_TIMEOUT=5s
+      - LLM_GATEWAY_CACHE_ENABLED=true
+      - LLM_GATEWAY_CACHE_TYPE=redis
+      - LLM_GATEWAY_CACHE_REDIS_ADDR=redis:6379
     volumes:
       - ./configs:/app/configs
       - ./logs:/app/logs
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - llm-gateway-network
@@ -27,10 +45,35 @@ services:
       - "6379:6379"
     volumes:
       - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
     restart: unless-stopped
     networks:
       - llm-gateway-network
     command: redis-server --appendonly yes
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: llm-gateway-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_DB=llm_gateway
+      - POSTGRES_USER=llm_gateway
+      - POSTGRES_PASSWORD=llm_gateway
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U llm_gateway -d llm_gateway"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - llm-gateway-network
 
   nginx:
     image: nginx:alpine
@@ -53,4 +96,6 @@ networks:
 
 volumes:
   redis-data:
+    driver: local
+  postgres-data:
     driver: local

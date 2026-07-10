@@ -111,10 +111,18 @@ func Enqueue(entry *models.UsageRecord) {
 // Enqueue submits a usage record without blocking. If the buffer is full the
 // entry is dropped and the drop counter is incremented.
 func (w *Writer) Enqueue(entry *models.UsageRecord) {
+	start := time.Now()
+	result := "enqueued"
+	defer func() {
+		metrics.RecordLogstoreEnqueue(result, time.Since(start))
+	}()
+
 	select {
 	case w.ch <- entry:
 	default:
-		metrics.RecordsDropped.Set(float64(w.dropped.Add(1)))
+		result = "dropped"
+		w.dropped.Add(1)
+		metrics.RecordsDropped.Inc()
 	}
 }
 

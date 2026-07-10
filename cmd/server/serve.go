@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
@@ -30,6 +31,7 @@ import (
 	_ "github.com/warm3snow/llm-gateway/internal/provider/azure"
 	_ "github.com/warm3snow/llm-gateway/internal/provider/cohere"
 	_ "github.com/warm3snow/llm-gateway/internal/provider/deepseek"
+	_ "github.com/warm3snow/llm-gateway/internal/provider/deterministic"
 	_ "github.com/warm3snow/llm-gateway/internal/provider/gemini"
 	_ "github.com/warm3snow/llm-gateway/internal/provider/glm"
 	_ "github.com/warm3snow/llm-gateway/internal/provider/groq"
@@ -142,17 +144,21 @@ func runServe(cmd *cobra.Command, args []string) error {
 	logstore.Init(logstore.Options{})
 
 	// 初始化缓存
-	cacheCfg := &cache.Config{
-		Type:       cfg.Cache.Type,
-		RedisAddr:  cfg.Cache.Redis.Addr,
-		RedisPass:  cfg.Cache.Redis.Password,
-		MaxEntries: 1000,
-		DefaultTTL: cfg.Cache.DefaultTTL,
-	}
-	cacheInstance, cacheErr := cache.NewCache(cacheCfg)
-	if cacheErr != nil {
-		log.Printf("Warning: Failed to initialize cache: %v", cacheErr)
-	} else {
+	var cacheInstance cache.Cache
+	if cfg.Cache.Enabled {
+		cacheCfg := &cache.Config{
+			Type:       cfg.Cache.Type,
+			RedisAddr:  cfg.Cache.Redis.Addr,
+			RedisPass:  cfg.Cache.Redis.Password,
+			RedisDB:    cfg.Cache.Redis.DB,
+			MaxEntries: 1000,
+			DefaultTTL: cfg.Cache.DefaultTTL,
+		}
+		var cacheErr error
+		cacheInstance, cacheErr = cache.NewCache(cacheCfg)
+		if cacheErr != nil {
+			return fmt.Errorf("failed to initialize enabled cache: %w", cacheErr)
+		}
 		log.Printf("[CACHE] Initialized %s cache", cfg.Cache.Type)
 	}
 
@@ -186,6 +192,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// Prometheus 指标端点
 	router.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
+	if cfg.Server.PprofEnabled {
+		registerPprofRoutes(router)
+		log.Printf("[PPROF] enabled at /debug/pprof")
+	}
+
 	// 日志输出已注册的提供商
 	log.Printf("[PROVIDER] Registered providers: %v", provider.GetGlobalFactory().ListProviders())
 
@@ -205,13 +216,24 @@ func runServe(cmd *cobra.Command, args []string) error {
 
 	// VirtualKeyService for budget tracking on usage records.
 	virtualKeyService := service.NewVirtualKeyService()
+	var budgetTracker *service.BudgetTracker
+	if cfg.Budget.AsyncEnabled {
+		budgetTracker = service.NewBudgetTracker(database.GetDB(), service.BudgetTrackerOptions{
+			QueueSize:     cfg.Budget.QueueSize,
+			BatchSize:     cfg.Budget.BatchSize,
+			FlushInterval: cfg.Budget.FlushInterval,
+			FlushTimeout:  cfg.Budget.FlushTimeout,
+		})
+		budgetTracker.Start()
+		log.Printf("[BUDGET] async tracker enabled queue_size=%d batch_size=%d flush_interval=%s", cfg.Budget.QueueSize, cfg.Budget.BatchSize, cfg.Budget.FlushInterval)
+	}
 
 	// API 路由（需要虚拟密钥认证 + 缓存 + 用量记录）
 	v1 := router.Group("/v1")
-	v1.Use(middleware.VirtualKeyAuth(cfg))
+	v1.Use(middleware.VirtualKeyAuthWithBudgetTracker(cfg, budgetTracker))
 	v1.Use(middleware.GuardrailMiddleware(guardrailManager))
-	v1.Use(middleware.UsageRecordMiddleware(cfg, virtualKeyService))
-	v1.Use(middleware.CacheMiddleware(cacheInstance))
+	v1.Use(middleware.UsageRecordMiddlewareWithBudgetTracker(cfg, virtualKeyService, budgetTracker))
+	v1.Use(middleware.CacheMiddleware(cacheInstance, cfg.Cache.DefaultTTL, cfg.Gateway.DefaultProvider))
 	{
 		v1.POST("/chat/completions", proxyHandler.HandleChatCompletion)
 		v1.POST("/completions", proxyHandler.HandleCompletion)
@@ -286,7 +308,12 @@ func runServe(cmd *cobra.Command, args []string) error {
 		log.Fatalf("Server forced to shutdown: %v", err)
 	}
 
-	// Flush any buffered usage records before the DB connection closes.
+	// Flush accepted budget usage and buffered usage records before DB close.
+	if budgetTracker != nil {
+		if err := budgetTracker.Shutdown(ctx); err != nil {
+			log.Printf("[BUDGET] WARN: async tracker shutdown incomplete: %v", err)
+		}
+	}
 	logstore.ShutdownDefault(ctx)
 
 	log.Println("Server exited")
@@ -327,6 +354,21 @@ func seedProvidersFromConfig(cfg *config.Config) {
 	cfg.Gateway.Providers = m
 	cfg.Gateway.ProvidersMu.Unlock()
 	log.Printf("[PROVIDER] loaded %d providers from DB", len(m))
+}
+
+func registerPprofRoutes(router *gin.Engine) {
+	router.GET("/debug/pprof/", gin.WrapF(pprof.Index))
+	router.GET("/debug/pprof/cmdline", gin.WrapF(pprof.Cmdline))
+	router.GET("/debug/pprof/profile", gin.WrapF(pprof.Profile))
+	router.POST("/debug/pprof/symbol", gin.WrapF(pprof.Symbol))
+	router.GET("/debug/pprof/symbol", gin.WrapF(pprof.Symbol))
+	router.GET("/debug/pprof/trace", gin.WrapF(pprof.Trace))
+	router.GET("/debug/pprof/allocs", gin.WrapH(pprof.Handler("allocs")))
+	router.GET("/debug/pprof/block", gin.WrapH(pprof.Handler("block")))
+	router.GET("/debug/pprof/goroutine", gin.WrapH(pprof.Handler("goroutine")))
+	router.GET("/debug/pprof/heap", gin.WrapH(pprof.Handler("heap")))
+	router.GET("/debug/pprof/mutex", gin.WrapH(pprof.Handler("mutex")))
+	router.GET("/debug/pprof/threadcreate", gin.WrapH(pprof.Handler("threadcreate")))
 }
 
 func setupSwagger(router *gin.Engine) {

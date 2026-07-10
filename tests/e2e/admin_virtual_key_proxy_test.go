@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -38,7 +39,7 @@ func newGatewayRouter(t *testing.T, cfg *config.Config) *gin.Engine {
 	v1 := router.Group("/v1")
 	v1.Use(middleware.VirtualKeyAuth(cfg))
 	v1.Use(middleware.UsageRecordMiddleware(cfg, virtualKeyService))
-	v1.Use(middleware.CacheMiddleware(nil))
+	v1.Use(middleware.CacheMiddleware(nil, time.Minute, cfg.Gateway.DefaultProvider))
 	v1.POST("/chat/completions", proxyHandler.HandleChatCompletion)
 	return router
 }

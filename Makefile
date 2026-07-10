@@ -8,7 +8,7 @@ DOCKER_CONTEXT_HOST := $(shell docker context inspect --format '{{json .Endpoint
 TESTCONTAINERS_DOCKER_HOST := $(if $(DOCKER_HOST),$(DOCKER_HOST),$(DOCKER_CONTEXT_HOST))
 TESTCONTAINERS_RYUK := $(if $(TESTCONTAINERS_RYUK_DISABLED),$(TESTCONTAINERS_RYUK_DISABLED),$(if $(filter rancher-desktop,$(shell docker context show 2>/dev/null)),true,false))
 
-.PHONY: all build run dev stop clean test test-unit test-api test-integration test-e2e lint fmt seed-dev seed-demo traffic-demo demo-data
+.PHONY: all build run dev stop clean test test-unit test-api test-integration test-e2e lint fmt seed-dev seed-demo traffic-demo demo-data load-test load-test-json load-test-stream load-test-soak load-test-capacity-500 load-test-capacity-1000 load-test-capacity-push
 
 ## 默认目标
 all: build
@@ -164,6 +164,56 @@ traffic-demo:
 	@echo "==> Generating demo traffic..."
 	go run ./cmd/generate-traffic --profile demo --requests $${REQUESTS:-20} --concurrency $${CONCURRENCY:-2}
 
+load-test:
+	@echo "==> Running load test..."
+	go run ./cmd/generate-traffic \
+		--profile $${PROFILE:-demo} \
+		--provider $${PROVIDER:-} \
+		--model $${MODEL:-} \
+		--scenario $${SCENARIO:-baseline-nonstream} \
+		--duration $${DURATION:-5m} \
+		--warmup $${WARMUP:-30s} \
+		--concurrency $${CONCURRENCY:-50} \
+		--rps $${RPS:-100} \
+		--metrics-url $${METRICS_URL:-http://localhost:8080/metrics} \
+		--metrics-interval $${METRICS_INTERVAL:-30s} \
+		--fail-threshold $${FAIL_THRESHOLD:-1} \
+		--p95-threshold $${P95_THRESHOLD:-0s} \
+		--output $${OUTPUT:-text}
+
+load-test-json:
+	@echo "==> Running load test with JSON output..."
+	go run ./cmd/generate-traffic \
+		--profile $${PROFILE:-demo} \
+		--provider $${PROVIDER:-} \
+		--model $${MODEL:-} \
+		--scenario $${SCENARIO:-baseline-nonstream} \
+		--duration $${DURATION:-5m} \
+		--warmup $${WARMUP:-30s} \
+		--concurrency $${CONCURRENCY:-50} \
+		--rps $${RPS:-100} \
+		--metrics-url $${METRICS_URL:-http://localhost:8080/metrics} \
+		--metrics-interval $${METRICS_INTERVAL:-30s} \
+		--fail-threshold $${FAIL_THRESHOLD:-1} \
+		--p95-threshold $${P95_THRESHOLD:-0s} \
+		--output json \
+		--output-file $${OUTPUT_FILE:-benchmark-result.json}
+
+load-test-stream:
+	@$(MAKE) load-test SCENARIO=streaming-ttft
+
+load-test-soak:
+	@$(MAKE) load-test SCENARIO=soak DURATION=$${DURATION:-30m} CONCURRENCY=$${CONCURRENCY:-100} RPS=$${RPS:-200}
+
+load-test-capacity-500:
+	@$(MAKE) load-test PROVIDER=deterministic MODEL=deterministic-chat SCENARIO=baseline-nonstream DURATION=$${DURATION:-5m} WARMUP=$${WARMUP:-30s} CONCURRENCY=500 RPS=500 P95_THRESHOLD=100ms
+
+load-test-capacity-1000:
+	@$(MAKE) load-test PROVIDER=deterministic MODEL=deterministic-chat SCENARIO=baseline-nonstream DURATION=$${DURATION:-5m} WARMUP=$${WARMUP:-30s} CONCURRENCY=1000 RPS=1000 P95_THRESHOLD=200ms
+
+load-test-capacity-push:
+	@$(MAKE) load-test PROVIDER=deterministic MODEL=deterministic-chat SCENARIO=baseline-nonstream DURATION=$${DURATION:-5m} WARMUP=$${WARMUP:-30s} CONCURRENCY=$${CONCURRENCY:-5000} RPS=$${RPS:-5000} P95_THRESHOLD=0s
+
 demo-data: seed-demo traffic-demo
 
 ## ============================================================
@@ -214,5 +264,12 @@ help:
 	@echo "    make seed-dev       - 生成本地开发 seed 数据"
 	@echo "    make seed-demo      - 生成 demo seed 数据和 manifest"
 	@echo "    make traffic-demo   - 基于 demo manifest 生成真实代理流量"
+	@echo "    make load-test      - 运行生产化压测场景"
+	@echo "    make load-test-json - 运行压测并输出 JSON 报告"
+	@echo "    make load-test-stream - 运行流式 TTFT 压测"
+	@echo "    make load-test-soak - 运行长时间 soak 压测"
+	@echo "    make load-test-capacity-500 - 500 RPS / 500 concurrency / p95 < 100ms"
+	@echo "    make load-test-capacity-1000 - 1000 RPS / 1000 concurrency / p95 < 200ms"
+	@echo "    make load-test-capacity-push - 逐步推到 5000 RPS 查瓶颈"
 	@echo "    make demo-data      - 生成 demo seed 数据并生成流量"
 	@echo ""

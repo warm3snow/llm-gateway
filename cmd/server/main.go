@@ -61,18 +61,31 @@ func persistentLoad() error {
 				GuardrailsEnabled: true,
 			},
 			Database: config.DatabaseConfig{
-				Driver:   "sqlite",
-				DSN:      "llm-gateway.db",
-				LogLevel: "warn",
+				Driver:          "sqlite",
+				DSN:             "llm-gateway.db",
+				LogLevel:        "warn",
+				MaxOpenConns:    50,
+				MaxIdleConns:    25,
+				ConnMaxLifetime: 30 * 60 * 1000 * 1000 * 1000,
+			},
+			Budget: config.BudgetConfig{
+				AsyncEnabled:  true,
+				QueueSize:     10000,
+				BatchSize:     500,
+				FlushInterval: 250 * 1000 * 1000,
+				FlushTimeout:  5 * 1000 * 1000 * 1000,
 			},
 		}
 	}
 	loadedConfig = cfg
 
 	dbCfg := &database.Config{
-		Driver:   cfg.Database.Driver,
-		DSN:      cfg.Database.DSN,
-		LogLevel: cfg.Database.LogLevel,
+		Driver:          cfg.Database.Driver,
+		DSN:             cfg.Database.DSN,
+		LogLevel:        cfg.Database.LogLevel,
+		MaxOpenConns:    cfg.Database.MaxOpenConns,
+		MaxIdleConns:    cfg.Database.MaxIdleConns,
+		ConnMaxLifetime: cfg.Database.ConnMaxLifetime,
 	}
 	if err := database.Connect(dbCfg); err != nil {
 		return fmt.Errorf("failed to connect to database: %w", err)

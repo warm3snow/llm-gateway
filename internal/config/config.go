@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -42,15 +43,19 @@ type Config struct {
 	Gateway  GatewayConfig  `mapstructure:"gateway" json:"gateway" yaml:"gateway"`
 	Database DatabaseConfig `mapstructure:"database" json:"database" yaml:"database"`
 	Cache    CacheConfig    `mapstructure:"cache" json:"cache" yaml:"cache"`
+	Budget   BudgetConfig   `mapstructure:"budget" json:"budget" yaml:"budget"`
 	Logging  LoggingConfig  `mapstructure:"logging" json:"logging" yaml:"logging"`
 	Security SecurityConfig `mapstructure:"security" json:"security" yaml:"security"`
 }
 
 // DatabaseConfig 数据库配置
 type DatabaseConfig struct {
-	Driver   string `mapstructure:"driver" json:"driver" yaml:"driver"`
-	DSN      string `mapstructure:"dsn" json:"dsn" yaml:"dsn"`
-	LogLevel string `mapstructure:"logLevel" json:"logLevel" yaml:"logLevel"`
+	Driver          string        `mapstructure:"driver" json:"driver" yaml:"driver"`
+	DSN             string        `mapstructure:"dsn" json:"dsn" yaml:"dsn"`
+	LogLevel        string        `mapstructure:"logLevel" json:"logLevel" yaml:"logLevel"`
+	MaxOpenConns    int           `mapstructure:"maxOpenConns" json:"maxOpenConns" yaml:"maxOpenConns"`
+	MaxIdleConns    int           `mapstructure:"maxIdleConns" json:"maxIdleConns" yaml:"maxIdleConns"`
+	ConnMaxLifetime time.Duration `mapstructure:"connMaxLifetime" json:"connMaxLifetime" yaml:"connMaxLifetime"`
 }
 
 // ServerConfig 服务器配置
@@ -61,6 +66,7 @@ type ServerConfig struct {
 	WriteTimeout    time.Duration `mapstructure:"writeTimeout" json:"writeTimeout" yaml:"writeTimeout"`
 	ShutdownTimeout time.Duration `mapstructure:"shutdownTimeout" json:"shutdownTimeout" yaml:"shutdownTimeout"`
 	Mode            string        `mapstructure:"mode" json:"mode" yaml:"mode"`
+	PprofEnabled    bool          `mapstructure:"pprofEnabled" json:"pprofEnabled" yaml:"pprofEnabled"`
 }
 
 // GatewayConfig 网关配置
@@ -101,6 +107,15 @@ type RedisConfig struct {
 	Addr     string `mapstructure:"addr" json:"addr" yaml:"addr"`
 	Password string `mapstructure:"password" json:"password" yaml:"password"`
 	DB       int    `mapstructure:"db" json:"db" yaml:"db"`
+}
+
+// BudgetConfig controls virtual-key budget accounting.
+type BudgetConfig struct {
+	AsyncEnabled  bool          `mapstructure:"asyncEnabled" json:"asyncEnabled" yaml:"asyncEnabled"`
+	QueueSize     int           `mapstructure:"queueSize" json:"queueSize" yaml:"queueSize"`
+	BatchSize     int           `mapstructure:"batchSize" json:"batchSize" yaml:"batchSize"`
+	FlushInterval time.Duration `mapstructure:"flushInterval" json:"flushInterval" yaml:"flushInterval"`
+	FlushTimeout  time.Duration `mapstructure:"flushTimeout" json:"flushTimeout" yaml:"flushTimeout"`
 }
 
 // LoggingConfig 日志配置
@@ -146,7 +161,16 @@ func LoadConfig(configPath string) (*Config, error) {
 
 	// 环境变量
 	v.SetEnvPrefix("LLM_GATEWAY")
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
+	_ = v.BindEnv("database.maxOpenConns", "LLM_GATEWAY_DATABASE_MAX_OPEN_CONNS")
+	_ = v.BindEnv("database.maxIdleConns", "LLM_GATEWAY_DATABASE_MAX_IDLE_CONNS")
+	_ = v.BindEnv("database.connMaxLifetime", "LLM_GATEWAY_DATABASE_CONN_MAX_LIFETIME")
+	_ = v.BindEnv("budget.asyncEnabled", "LLM_GATEWAY_BUDGET_ASYNC_ENABLED")
+	_ = v.BindEnv("budget.queueSize", "LLM_GATEWAY_BUDGET_QUEUE_SIZE")
+	_ = v.BindEnv("budget.batchSize", "LLM_GATEWAY_BUDGET_BATCH_SIZE")
+	_ = v.BindEnv("budget.flushInterval", "LLM_GATEWAY_BUDGET_FLUSH_INTERVAL")
+	_ = v.BindEnv("budget.flushTimeout", "LLM_GATEWAY_BUDGET_FLUSH_TIMEOUT")
 
 	// 读取配置
 	if err := v.ReadInConfig(); err != nil {
@@ -187,6 +211,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.writeTimeout", 60*time.Second)
 	v.SetDefault("server.shutdownTimeout", 30*time.Second)
 	v.SetDefault("server.mode", "release")
+	v.SetDefault("server.pprofEnabled", false)
 
 	v.SetDefault("gateway.defaultProvider", "openai")
 	v.SetDefault("gateway.guardrailsEnabled", true)
@@ -212,6 +237,12 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("cache.redis.password", "")
 	v.SetDefault("cache.redis.db", 0)
 
+	v.SetDefault("budget.asyncEnabled", true)
+	v.SetDefault("budget.queueSize", 10000)
+	v.SetDefault("budget.batchSize", 500)
+	v.SetDefault("budget.flushInterval", 250*time.Millisecond)
+	v.SetDefault("budget.flushTimeout", 5*time.Second)
+
 	v.SetDefault("logging.level", "info")
 	v.SetDefault("logging.format", "json")
 	v.SetDefault("logging.outputPath", "stdout")
@@ -228,6 +259,9 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("database.driver", "sqlite")
 	v.SetDefault("database.dsn", "llm-gateway.db")
 	v.SetDefault("database.logLevel", "warn")
+	v.SetDefault("database.maxOpenConns", 50)
+	v.SetDefault("database.maxIdleConns", 25)
+	v.SetDefault("database.connMaxLifetime", 30*time.Minute)
 }
 
 // validateConfig 验证配置
@@ -240,6 +274,28 @@ func validateConfig(cfg *Config) error {
 		return fmt.Errorf("invalid max request timeout: %d", cfg.Gateway.MaxRequestTimeout)
 	}
 
+	if cfg.Database.MaxOpenConns < 0 {
+		return fmt.Errorf("invalid database maxOpenConns: %d", cfg.Database.MaxOpenConns)
+	}
+	if cfg.Database.MaxIdleConns < 0 {
+		return fmt.Errorf("invalid database maxIdleConns: %d", cfg.Database.MaxIdleConns)
+	}
+	if cfg.Database.ConnMaxLifetime < 0 {
+		return fmt.Errorf("invalid database connMaxLifetime: %s", cfg.Database.ConnMaxLifetime)
+	}
+	if cfg.Budget.QueueSize < 0 {
+		return fmt.Errorf("invalid budget queueSize: %d", cfg.Budget.QueueSize)
+	}
+	if cfg.Budget.BatchSize < 0 {
+		return fmt.Errorf("invalid budget batchSize: %d", cfg.Budget.BatchSize)
+	}
+	if cfg.Budget.FlushInterval < 0 {
+		return fmt.Errorf("invalid budget flushInterval: %s", cfg.Budget.FlushInterval)
+	}
+	if cfg.Budget.FlushTimeout < 0 {
+		return fmt.Errorf("invalid budget flushTimeout: %s", cfg.Budget.FlushTimeout)
+	}
+
 	return nil
 }
 
@@ -250,6 +306,8 @@ func SaveConfig(cfg *Config, path string) error {
 	v.Set("server", cfg.Server)
 	v.Set("gateway", cfg.Gateway)
 	v.Set("cache", cfg.Cache)
+	v.Set("budget", cfg.Budget)
+	v.Set("database", cfg.Database)
 	v.Set("logging", cfg.Logging)
 	v.Set("security", cfg.Security)
 

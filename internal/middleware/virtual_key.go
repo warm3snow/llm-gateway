@@ -5,24 +5,34 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/warm3snow/llm-gateway/internal/config"
 	"github.com/warm3snow/llm-gateway/internal/database"
+	"github.com/warm3snow/llm-gateway/internal/metrics"
 	"github.com/warm3snow/llm-gateway/internal/models"
+	"github.com/warm3snow/llm-gateway/internal/service"
+	"gorm.io/gorm"
 )
 
 // VirtualKeyAuth validates virtual keys from request headers.
 // The header name is read from cfg.Security.APIKeyHeader (default: x-llm-gateway-api-key).
 // If a valid key is found, it sets "virtual_key_id" and "virtual_key_name" in the context.
 func VirtualKeyAuth(cfg *config.Config) gin.HandlerFunc {
+	return VirtualKeyAuthWithBudgetTracker(cfg, nil)
+}
+
+func VirtualKeyAuthWithBudgetTracker(cfg *config.Config, budgetTracker *service.BudgetTracker) gin.HandlerFunc {
 	headerName := "x-llm-gateway-api-key"
 	if cfg != nil && cfg.Security.APIKeyHeader != "" {
 		headerName = cfg.Security.APIKeyHeader
 	}
+	authCache := newVirtualKeyAuthCache(5*time.Minute, 10*time.Second)
 
 	return func(c *gin.Context) {
 		// Skip auth for health and admin UI static files
@@ -32,50 +42,116 @@ func VirtualKeyAuth(cfg *config.Config) gin.HandlerFunc {
 			return
 		}
 
+		start := time.Now()
+		metricResult := "success"
+		activeKeysLoaded := 0
+		recorded := false
+		recordMetric := func() {
+			if recorded {
+				return
+			}
+			recorded = true
+			metrics.RecordVirtualKeyAuth(middlewareMetricEndpoint(c), metricResult, activeKeysLoaded, time.Since(start))
+		}
+
 		// Read virtual key from the configured header
 		vk := c.GetHeader(headerName)
 
 		if vk == "" {
+			metricResult = "missing_key"
 			// No virtual key provided - reject
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"error":  "Missing virtual key. Provide it via the " + headerName + " header.",
 				"status": "error",
 			})
+			recordMetric()
 			return
 		}
 
-		// Validate the key against the database
-		var keys []models.VirtualKey
-		if err := database.GetDB().Where("status = ?", "active").Find(&keys).Error; err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
-				"error":  "Internal server error",
-				"status": "error",
-			})
-			return
-		}
-
-		var matchedKey *models.VirtualKey
-		for i := range keys {
-			if verifyKey(vk, keys[i].KeyHash, keys[i].KeySalt) {
-				matchedKey = &keys[i]
-				break
-			}
-		}
-
-		if matchedKey == nil {
+		cacheDigest := virtualKeyCacheDigest(vk)
+		if authCache.isNegative(cacheDigest) {
+			metricResult = "invalid_key_cached"
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"error":  "Invalid virtual key",
 				"status": "error",
 			})
+			recordMetric()
 			return
 		}
 
-		// Check budget
-		if matchedKey.BudgetTotal > 0 && matchedKey.BudgetUsed >= matchedKey.BudgetTotal {
+		var matchedKey *models.VirtualKey
+		if cachedID, ok := authCache.getPositive(cacheDigest); ok {
+			var cachedKey models.VirtualKey
+			if err := database.GetDB().Where("id = ? AND status = ?", cachedID, "active").First(&cachedKey).Error; err != nil {
+				if errors.Is(err, gorm.ErrRecordNotFound) {
+					authCache.evictPositive(cacheDigest)
+					metricResult = "invalid_key_cached"
+					c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+						"error":  "Invalid virtual key",
+						"status": "error",
+					})
+				} else {
+					metricResult = "lookup_error_cached"
+					c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+						"error":  "Internal server error",
+						"status": "error",
+					})
+				}
+				recordMetric()
+				return
+			}
+			matchedKey = &cachedKey
+		} else {
+			// Validate the key against the database. Cold lookups still scan because
+			// stored key hashes are salted per row; hot keys use the local TTL cache.
+			var keys []models.VirtualKey
+			if err := database.GetDB().Where("status = ?", "active").Find(&keys).Error; err != nil {
+				metricResult = "lookup_error"
+				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+					"error":  "Internal server error",
+					"status": "error",
+				})
+				recordMetric()
+				return
+			}
+
+			activeKeysLoaded = len(keys)
+			for i := range keys {
+				if verifyKey(vk, keys[i].KeyHash, keys[i].KeySalt) {
+					matchedKey = &keys[i]
+					break
+				}
+			}
+			if matchedKey != nil {
+				authCache.putPositive(cacheDigest, matchedKey.ID)
+			}
+		}
+
+		if matchedKey == nil {
+			authCache.putNegative(cacheDigest)
+			metricResult = "invalid_key"
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error":  "Invalid virtual key",
+				"status": "error",
+			})
+			recordMetric()
+			return
+		}
+
+		// Check budget, including cost accepted by the async budget tracker but not
+		// flushed to the database yet.
+		pendingBudget := 0.0
+		if budgetTracker != nil {
+			pendingBudget = budgetTracker.Pending(matchedKey.ID)
+		}
+		if matchedKey.BudgetTotal > 0 && matchedKey.BudgetUsed+pendingBudget >= matchedKey.BudgetTotal {
+			authCache.evictPositive(cacheDigest)
+			metricResult = "budget_exceeded"
 			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
 				"error":  "Budget exceeded",
 				"status": "error",
 			})
+			recordMetric()
 			return
 		}
 
@@ -102,10 +178,12 @@ func VirtualKeyAuth(cfg *config.Config) gin.HandlerFunc {
 				providerName = cfg.Gateway.DefaultProvider
 			}
 			if !virtualKeyAllowsProvider(matchedKey.Providers, providerName) {
+				metricResult = "provider_forbidden"
 				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
 					"error":  "Provider is not allowed for this virtual key",
 					"status": "error",
 				})
+				recordMetric()
 				return
 			}
 		}
@@ -117,6 +195,7 @@ func VirtualKeyAuth(cfg *config.Config) gin.HandlerFunc {
 		c.Set("virtual_key_created_by_username", matchedKey.CreatedByUsername)
 		c.Set("tenant_id", matchedKey.TenantID)
 
+		recordMetric()
 		c.Next()
 	}
 }
