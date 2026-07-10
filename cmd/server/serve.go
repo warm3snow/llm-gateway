@@ -118,7 +118,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 		&models.TenantMember{},
 		&models.VirtualKey{},
 		&models.UsageRecord{},
+		&models.IdempotencyRecord{},
+		&models.AlertRule{},
+		&models.AlertEvent{},
 		&models.ProviderConfig{},
+		&models.ProviderHealth{},
 		&models.CacheEntry{},
 		&models.ModelPricing{},
 	)
@@ -228,10 +232,15 @@ func runServe(cmd *cobra.Command, args []string) error {
 		log.Printf("[BUDGET] async tracker enabled queue_size=%d batch_size=%d flush_interval=%s", cfg.Budget.QueueSize, cfg.Budget.BatchSize, cfg.Budget.FlushInterval)
 	}
 
+	healthCtx, stopHealthChecks := context.WithCancel(context.Background())
+	providerHealthService := service.NewProviderHealthService(proxyHandler.ProviderFactory)
+	providerHealthService.Start(healthCtx, 5*time.Minute)
+
 	// API 路由（需要虚拟密钥认证 + 缓存 + 用量记录）
 	v1 := router.Group("/v1")
 	v1.Use(middleware.VirtualKeyAuthWithBudgetTracker(cfg, budgetTracker))
 	v1.Use(middleware.GuardrailMiddleware(guardrailManager))
+	v1.Use(middleware.IdempotencyMiddleware(service.NewIdempotencyService(), 24*time.Hour))
 	v1.Use(middleware.UsageRecordMiddlewareWithBudgetTracker(cfg, virtualKeyService, budgetTracker))
 	v1.Use(middleware.CacheMiddleware(cacheInstance, cfg.Cache.DefaultTTL, cfg.Gateway.DefaultProvider))
 	{
@@ -258,6 +267,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 	adminHandler := handler.NewHandler(cfg)
 	adminHandler.RegisterRoutesWithAuth(router, jwtMiddleware)
 
+	// Provider 健康状态路由（需要JWT保护）
+	providerHealthHandler := handler.NewProviderHealthHandler(providerHealthService)
+	providerHealthHandler.RegisterRoutesWithAuth(router, jwtMiddleware)
+
 	// 统计路由（需要JWT保护）
 	statsHandler := handler.NewStatsHandler(cfg)
 	statsHandler.RegisterRoutesWithAuth(router, jwtMiddleware)
@@ -269,6 +282,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// 虚拟密钥路由（需要JWT保护）
 	vkHandler := handler.NewVirtualKeyHandler()
 	vkHandler.RegisterRoutesWithAuth(router, jwtMiddleware)
+
+	// 告警路由（需要JWT保护）
+	alertHandler := handler.NewAlertHandler()
+	alertHandler.RegisterRoutesWithAuth(router, jwtMiddleware)
 
 	// 租户管理路由（需要JWT + super_admin）
 	tenantHandler := handler.NewTenantHandler()
@@ -300,6 +317,7 @@ func runServe(cmd *cobra.Command, args []string) error {
 	<-quit
 
 	log.Println("Shutting down server...")
+	stopHealthChecks()
 
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeout)
 	defer cancel()

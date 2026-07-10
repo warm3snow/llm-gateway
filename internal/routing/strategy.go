@@ -8,8 +8,8 @@ import (
 
 // Engine selects a provider based on the configured strategy.
 type Engine struct {
-	Config   *types.Strategy
-	Options  []types.Options
+	Config  *types.Strategy
+	Options []types.Options
 }
 
 // NewEngine creates a new routing engine.
@@ -34,6 +34,11 @@ func (e *Engine) Select(req interface{}) (*types.Options, error) {
 	case types.StrategyConditional:
 		if r, ok := req.(*types.ChatCompletionRequest); ok {
 			return e.conditional(r)
+		}
+		return &e.Options[0], nil
+	case types.StrategyABTest:
+		if r, ok := req.(*types.ChatCompletionRequest); ok {
+			return e.abTest(r)
 		}
 		return &e.Options[0], nil
 	case types.StrategySingle:

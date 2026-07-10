@@ -45,7 +45,7 @@ func NewCohereProvider(opts *types.Options) (provider.Provider, error) {
 			Name:    string(types.ProviderCohere),
 			BaseURL: baseURL,
 			Endpoints: map[string]string{
-				"chat":      "/chat",
+				"chat":       "/chat",
 				"embeddings": "/embed",
 				"models":     "/models",
 			},
@@ -57,7 +57,7 @@ func NewCohereProvider(opts *types.Options) (provider.Provider, error) {
 	}, nil
 }
 
-func (p *CohereProvider) GetName() string  { return p.Name }
+func (p *CohereProvider) GetName() string    { return p.Name }
 func (p *CohereProvider) GetBaseURL() string { return p.BaseURL }
 func (p *CohereProvider) GetEndpoints() []string {
 	eps := make([]string, 0, len(p.Endpoints))
@@ -69,8 +69,8 @@ func (p *CohereProvider) GetEndpoints() []string {
 
 func (p *CohereProvider) ChatCompletion(ctx context.Context, req *types.ChatCompletionRequest, opts *types.Options) (*http.Response, error) {
 	cohereReq := map[string]interface{}{
-		"model":      req.Model,
-		"messages":  convertMessagesToCohere(req.Messages),
+		"model":       req.Model,
+		"messages":    convertMessagesToCohere(req.Messages),
 		"temperature": req.Temperature,
 		"max_tokens":  req.MaxTokens,
 		"stream":      req.Stream,
@@ -99,8 +99,8 @@ func (p *CohereProvider) Completion(ctx context.Context, req *types.CompletionRe
 
 func (p *CohereProvider) Embedding(ctx context.Context, req *types.EmbeddingRequest, opts *types.Options) (*http.Response, error) {
 	cohereReq := map[string]interface{}{
-		"model":     req.Model,
-		"texts":     req.Input,
+		"model":      req.Model,
+		"texts":      req.Input,
 		"input_type": "search_document",
 	}
 	url := p.BaseURL + "/embed"
@@ -122,8 +122,12 @@ func (p *CohereProvider) AudioSpeech(ctx context.Context, req map[string]interfa
 	return nil, fmt.Errorf("cohere does not support audio speech")
 }
 
-func (p *CohereProvider) AudioTranscription(ctx context.Context, req map[string]interface{}, opts *types.Options) (*http.Response, error) {
+func (p *CohereProvider) AudioTranscription(ctx context.Context, req *types.AudioRequest, opts *types.Options) (*http.Response, error) {
 	return nil, fmt.Errorf("cohere does not support audio transcription")
+}
+
+func (p *CohereProvider) AudioTranslation(ctx context.Context, req *types.AudioRequest, opts *types.Options) (*http.Response, error) {
+	return nil, fmt.Errorf("cohere does not support audio translation")
 }
 
 func (p *CohereProvider) Models(ctx context.Context, opts *types.Options) (*http.Response, error) {
@@ -164,7 +168,7 @@ func convertMessagesToCohere(messages []types.Message) []map[string]interface{} 
 			text = c
 		}
 		result = append(result, map[string]interface{}{
-			"role":  role,
+			"role":    role,
 			"content": text,
 		})
 	}

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import {
   useProviders,
+  useProviderHealth,
   useCreateProvider,
   useUpdateProvider,
   useDeleteProvider,
@@ -60,6 +61,7 @@ function maskKey(k?: string) {
 
 export default function ProvidersPage() {
   const { data: providers, isLoading } = useProviders();
+  const { data: providerHealth } = useProviderHealth();
   const createMut = useCreateProvider();
   const updateMut = useUpdateProvider();
   const deleteMut = useDeleteProvider();
@@ -360,7 +362,11 @@ export default function ProvidersPage() {
         />
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-          {providers.map((p) => (
+          {providers.map((p) => {
+            const health = providerHealth?.find((h) => h.provider_name === p.name);
+            const healthLabel = !p.enabled ? "disabled" : health ? health.status : "unchecked";
+            const healthVariant = !p.enabled ? "outline" : health?.healthy ? "success" : health ? "destructive" : "outline";
+            return (
             <Panel key={p.name} className="flex flex-col">
               {/* Header row — name + status */}
               <PanelHeader>
@@ -380,11 +386,7 @@ export default function ProvidersPage() {
                     </div>
                   </div>
                 </div>
-                {p.enabled ? (
-                  <Badge variant="success">up</Badge>
-                ) : (
-                  <Badge variant="outline">down</Badge>
-                )}
+                <Badge variant={healthVariant}>{healthLabel}</Badge>
               </PanelHeader>
 
               <PanelBody className="flex-1 space-y-2.5 font-mono text-[11px]">
@@ -402,6 +404,19 @@ export default function ProvidersPage() {
                     {p.requestTimeout}ms
                   </span>
                 </div>
+                {health && (
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-muted-foreground">health</span>
+                    <span className="truncate text-right text-muted-foreground">
+                      {health.latency_ms}ms · {health.consecutive_errors} err
+                    </span>
+                  </div>
+                )}
+                {health?.error_message && (
+                  <div className="truncate rounded-sm border border-destructive/30 bg-destructive/5 px-2 py-1 text-destructive">
+                    {health.error_message}
+                  </div>
+                )}
                 <div className="flex items-center justify-between gap-2">
                   <span className="flex items-center gap-1.5 text-muted-foreground">
                     <Key className="h-3 w-3" /> api key
@@ -453,7 +468,8 @@ export default function ProvidersPage() {
                 </div>
               </div>
             </Panel>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

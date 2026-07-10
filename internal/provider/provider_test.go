@@ -35,7 +35,11 @@ func (m *MockProvider) AudioSpeech(ctx context.Context, req map[string]interface
 	return nil, nil
 }
 
-func (m *MockProvider) AudioTranscription(ctx context.Context, req map[string]interface{}, opts *types.Options) (*http.Response, error) {
+func (m *MockProvider) AudioTranscription(ctx context.Context, req *types.AudioRequest, opts *types.Options) (*http.Response, error) {
+	return nil, nil
+}
+
+func (m *MockProvider) AudioTranslation(ctx context.Context, req *types.AudioRequest, opts *types.Options) (*http.Response, error) {
 	return nil, nil
 }
 

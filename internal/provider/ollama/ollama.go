@@ -88,8 +88,12 @@ func (p *OllamaProvider) AudioSpeech(ctx context.Context, req map[string]interfa
 	return nil, fmt.Errorf("ollama does not support audio speech")
 }
 
-func (p *OllamaProvider) AudioTranscription(ctx context.Context, req map[string]interface{}, opts *types.Options) (*http.Response, error) {
+func (p *OllamaProvider) AudioTranscription(ctx context.Context, req *types.AudioRequest, opts *types.Options) (*http.Response, error) {
 	return nil, fmt.Errorf("ollama does not support audio transcription")
+}
+
+func (p *OllamaProvider) AudioTranslation(ctx context.Context, req *types.AudioRequest, opts *types.Options) (*http.Response, error) {
+	return nil, fmt.Errorf("ollama does not support audio translation")
 }
 
 func (p *OllamaProvider) Models(ctx context.Context, opts *types.Options) (*http.Response, error) {

@@ -162,7 +162,7 @@ seed-demo:
 
 traffic-demo:
 	@echo "==> Generating demo traffic..."
-	go run ./cmd/generate-traffic --profile demo --requests $${REQUESTS:-20} --concurrency $${CONCURRENCY:-2}
+	go run ./cmd/generate-traffic --profile demo --provider "$${PROVIDER:-ollama}" --model "$${MODEL:-}" --requests $${REQUESTS:-20} --concurrency $${CONCURRENCY:-2}
 
 load-test:
 	@echo "==> Running load test..."

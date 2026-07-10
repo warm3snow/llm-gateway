@@ -204,7 +204,7 @@ func (t *BudgetTracker) flushBatch(ctx context.Context, updates map[uint]float64
 	if t.db == nil {
 		return errors.New("budget tracker database is nil")
 	}
-	return t.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	if err := t.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		for id, cost := range updates {
 			result := tx.Model(&models.VirtualKey{}).Where("id = ?", id).
 				UpdateColumn("budget_used", gorm.Expr("budget_used + ?", cost))
@@ -216,7 +216,16 @@ func (t *BudgetTracker) flushBatch(ctx context.Context, updates map[uint]float64
 			}
 		}
 		return nil
-	})
+	}); err != nil {
+		return err
+	}
+	alerts := NewAlertService(t.db)
+	for id := range updates {
+		if err := alerts.CheckVirtualKey(id); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (t *BudgetTracker) drainQueue() {

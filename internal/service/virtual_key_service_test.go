@@ -26,6 +26,7 @@ func TestVirtualKeyServiceCreateAndValidateKey(t *testing.T) {
 	assert.Equal(t, uint(1), vk.TenantID)
 	assert.Equal(t, "production", vk.Name)
 	assert.Equal(t, float64(100), vk.BudgetTotal)
+	assert.Equal(t, 60, vk.RateLimit)
 	assert.Equal(t, 60, vk.RateLimitWindow)
 	assert.Equal(t, "openai,anthropic", vk.Providers)
 	assert.Equal(t, &creatorID, vk.CreatedByUserID)
@@ -33,6 +34,17 @@ func TestVirtualKeyServiceCreateAndValidateKey(t *testing.T) {
 	validated, err := svc.ValidateKey(fullKey)
 	require.NoError(t, err)
 	assert.Equal(t, vk.ID, validated.ID)
+}
+
+func TestVirtualKeyServiceAllowsExplicitUnlimitedRateLimit(t *testing.T) {
+	testutil.SetupSQLiteDB(t)
+	testutil.CreateTenant(t, 1, "tenant-one")
+	svc := NewVirtualKeyService()
+	rateLimit := 0
+
+	_, vk, err := svc.Create(1, &models.VirtualKeyRequest{Name: "unlimited", RateLimit: &rateLimit}, nil, "")
+	require.NoError(t, err)
+	assert.Equal(t, 0, vk.RateLimit)
 }
 
 func TestVirtualKeyServiceRejectsKeyWhenBudgetIsExceeded(t *testing.T) {

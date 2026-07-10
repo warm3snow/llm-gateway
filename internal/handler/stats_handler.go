@@ -75,6 +75,15 @@ func statsAccessScope(c *gin.Context) (service.AccessScope, bool) {
 // GET /api/v1/stats/hourly?hours=24
 func (h *StatsHandler) GetHourly(c *gin.Context) {
 	start, end := windowFromQuery(c)
+	status := c.Query("status")
+	if !service.IsValidUsageStatus(status) {
+		c.AbortWithStatusJSON(http.StatusBadRequest, types.ErrorResponse{
+			Message: "status must be success or error",
+			Type:    "invalid_request_error",
+		})
+		return
+	}
+	statusCode, _ := strconv.Atoi(c.Query("status_code"))
 	scope, ok := statsAccessScope(c)
 	if !ok {
 		c.AbortWithStatusJSON(http.StatusUnauthorized, types.ErrorResponse{
@@ -83,7 +92,7 @@ func (h *StatsHandler) GetHourly(c *gin.Context) {
 		})
 		return
 	}
-	points, err := h.service.GetHourlyTimeSeries(scope, start, end)
+	points, err := h.service.GetHourlyTimeSeriesWithStatus(scope, start, end, status, statusCode)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, types.ErrorResponse{
 			Message: "Failed to get hourly stats",

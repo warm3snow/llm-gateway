@@ -817,6 +817,9 @@ func keysForProvider(manifest *seedmanifest.Manifest, provider string) []seedman
 }
 
 func firstProvider(manifest *seedmanifest.Manifest) string {
+	if provider := strings.TrimSpace(manifest.DefaultProvider); provider != "" && manifestHasProvider(manifest, provider) {
+		return provider
+	}
 	if len(manifest.Providers) > 0 {
 		return manifest.Providers[0].Name
 	}
@@ -824,6 +827,20 @@ func firstProvider(manifest *seedmanifest.Manifest) string {
 		return manifest.VirtualKeys[0].Providers[0]
 	}
 	return ""
+}
+
+func manifestHasProvider(manifest *seedmanifest.Manifest, provider string) bool {
+	for _, entry := range manifest.Providers {
+		if entry.Name == provider {
+			return true
+		}
+	}
+	for _, key := range manifest.VirtualKeys {
+		if contains(key.Providers, provider) {
+			return true
+		}
+	}
+	return false
 }
 
 func contains(values []string, needle string) bool {

@@ -86,8 +86,12 @@ func (p *KimiProvider) AudioSpeech(ctx context.Context, req map[string]interface
 	return nil, fmt.Errorf("kimi does not support audio speech")
 }
 
-func (p *KimiProvider) AudioTranscription(ctx context.Context, req map[string]interface{}, opts *types.Options) (*http.Response, error) {
+func (p *KimiProvider) AudioTranscription(ctx context.Context, req *types.AudioRequest, opts *types.Options) (*http.Response, error) {
 	return nil, fmt.Errorf("kimi does not support audio transcription")
+}
+
+func (p *KimiProvider) AudioTranslation(ctx context.Context, req *types.AudioRequest, opts *types.Options) (*http.Response, error) {
+	return nil, fmt.Errorf("kimi does not support audio translation")
 }
 
 func (p *KimiProvider) Models(ctx context.Context, opts *types.Options) (*http.Response, error) {

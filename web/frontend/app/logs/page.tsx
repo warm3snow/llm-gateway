@@ -73,37 +73,23 @@ export default function LogsPage() {
   const { data, isLoading, refetch, isFetching } = useUsage({
     limit: PAGE_SIZE,
     offset: page * PAGE_SIZE,
+    status: filter === "all" ? undefined : filter,
   });
 
   const logs = data?.records ?? [];
   const total = data?.total ?? 0;
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
-  // Status filter is applied client-side within the current page.
-  const filtered = logs.filter((l) => {
-    if (filter === "all") return true;
-    if (filter === "success") return l.status_code < 400;
-    if (filter === "error") return l.status_code >= 400;
-    return true;
-  });
 
   async function copyPreview() {
     if (!selected?.model_input_preview) return;
     await navigator.clipboard?.writeText(selected.model_input_preview);
   }
 
-  const filterOptions: { key: StatusFilter; label: string; count: number }[] = [
-    { key: "all", label: "all", count: logs.length },
-    {
-      key: "success",
-      label: "ok",
-      count: logs.filter((l) => l.status_code < 400).length,
-    },
-    {
-      key: "error",
-      label: "err",
-      count: logs.filter((l) => l.status_code >= 400).length,
-    },
+  const filterOptions: { key: StatusFilter; label: string; count?: number }[] = [
+    { key: "all", label: "all", count: filter === "all" ? total : undefined },
+    { key: "success", label: "ok", count: filter === "success" ? total : undefined },
+    { key: "error", label: "err", count: filter === "error" ? total : undefined },
   ];
 
   return (
@@ -153,7 +139,9 @@ export default function LogsPage() {
               )}
             >
               <span>{opt.label}</span>
-              <span className="num text-[10px] opacity-70">{opt.count}</span>
+              {opt.count != null && (
+                <span className="num text-[10px] opacity-70">{opt.count}</span>
+              )}
             </button>
           ))}
         </div>
@@ -166,7 +154,7 @@ export default function LogsPage() {
               <Skeleton key={i} className="h-12 rounded-none" />
             ))}
           </div>
-        ) : filtered.length === 0 ? (
+        ) : logs.length === 0 ? (
           <EmptyState
             title="no records"
             description={
@@ -204,7 +192,7 @@ export default function LogsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border/60">
-                {filtered.map((log) => {
+                {logs.map((log) => {
                   const tone = statusTone(log.status_code);
                   return (
                     <tr

@@ -22,10 +22,10 @@ type AzureProvider struct {
 	APIKey       string
 	ResourceName string
 	DeploymentID string
-	APIVersion    string
-	BaseURL       string
+	APIVersion   string
+	BaseURL      string
 	HTTPClient   *http.Client
-	Timeout       time.Duration
+	Timeout      time.Duration
 }
 
 // NewAzureProvider 创建 Azure OpenAI 提供商
@@ -72,14 +72,14 @@ func NewAzureProvider(opts *types.Options) (provider.Provider, error) {
 		APIKey:       apiKey,
 		ResourceName: resource,
 		DeploymentID: deployment,
-		APIVersion:    apiVersion,
-		BaseURL:       baseURL,
+		APIVersion:   apiVersion,
+		BaseURL:      baseURL,
 		HTTPClient:   &http.Client{Timeout: timeout},
-		Timeout:       timeout,
+		Timeout:      timeout,
 	}, nil
 }
 
-func (p *AzureProvider) GetName() string  { return p.Name }
+func (p *AzureProvider) GetName() string    { return p.Name }
 func (p *AzureProvider) GetBaseURL() string { return p.BaseURL }
 func (p *AzureProvider) GetEndpoints() []string {
 	eps := make([]string, 0, len(p.Endpoints))
@@ -185,8 +185,12 @@ func (p *AzureProvider) AudioSpeech(ctx context.Context, req map[string]interfac
 }
 
 // AudioTranscription 语音转文本 — Azure OpenAI 不支持
-func (p *AzureProvider) AudioTranscription(ctx context.Context, req map[string]interface{}, opts *types.Options) (*http.Response, error) {
+func (p *AzureProvider) AudioTranscription(ctx context.Context, req *types.AudioRequest, opts *types.Options) (*http.Response, error) {
 	return nil, fmt.Errorf("azure openai does not support audio transcription")
+}
+
+func (p *AzureProvider) AudioTranslation(ctx context.Context, req *types.AudioRequest, opts *types.Options) (*http.Response, error) {
+	return nil, fmt.Errorf("azure openai does not support audio translation")
 }
 
 // Models 获取模型列表

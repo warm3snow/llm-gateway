@@ -226,12 +226,18 @@ func (s *StatsService) hourGroupExpr() string {
 // GetHourlyTimeSeries returns invocation counts and cost bucketed by hour over
 // [start, end], for finer-grained dashboards and alerting.
 func (s *StatsService) GetHourlyTimeSeries(scope AccessScope, start, end time.Time) ([]TimeSeriesPoint, error) {
-	return s.timeSeries(scope, s.hourGroupExpr(), start, end)
+	return s.GetHourlyTimeSeriesWithStatus(scope, start, end, "", 0)
+}
+
+// GetHourlyTimeSeriesWithStatus returns hourly invocation counts and cost with
+// either an exact status_code filter or a status family filter: success/error.
+func (s *StatsService) GetHourlyTimeSeriesWithStatus(scope AccessScope, start, end time.Time, status string, statusCode int) ([]TimeSeriesPoint, error) {
+	return s.timeSeries(scope, s.hourGroupExpr(), start, end, status, statusCode)
 }
 
 // timeSeries returns invocation counts and cost grouped by groupExpr over the
 // optional [start, end] window, scoped to the caller.
-func (s *StatsService) timeSeries(scope AccessScope, groupExpr string, start, end time.Time) ([]TimeSeriesPoint, error) {
+func (s *StatsService) timeSeries(scope AccessScope, groupExpr string, start, end time.Time, status string, statusCode int) ([]TimeSeriesPoint, error) {
 	points := []TimeSeriesPoint{}
 	if s.db == nil {
 		return points, nil
@@ -254,6 +260,7 @@ func (s *StatsService) timeSeries(scope AccessScope, groupExpr string, start, en
 	if !end.IsZero() {
 		query = query.Where("created_at <= ?", end)
 	}
+	query = applyUsageStatusFilter(query, status, statusCode)
 
 	if err := query.Scan(&rows).Error; err != nil {
 		return nil, err

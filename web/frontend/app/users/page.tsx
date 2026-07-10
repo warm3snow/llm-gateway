@@ -52,7 +52,7 @@ export default function UsersPage() {
     queryFn: () => api.getTenants(),
     enabled: isSuperAdmin,
   });
-  const tenants = tenantsData?.tenants ?? [];
+  const tenants = useMemo(() => tenantsData?.tenants ?? [], [tenantsData?.tenants]);
   const tenantNameById = useMemo(
     () => new Map(tenants.map((t) => [t.id, t.name])),
     [tenants]

@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/warm3snow/llm-gateway/internal/config"
@@ -92,8 +93,9 @@ func run(opts seedOptions) error {
 	}
 
 	manifest := &seedmanifest.Manifest{
-		Profile: profile,
-		BaseURL: baseURL(opts.BaseURL, cfg),
+		Profile:         profile,
+		BaseURL:         baseURL(opts.BaseURL, cfg),
+		DefaultProvider: cfg.Gateway.DefaultProvider,
 	}
 
 	providerNames, err := seedProviders(cfg, manifest)
@@ -157,15 +159,15 @@ func seedProviders(cfg *config.Config, manifest *seedmanifest.Manifest) ([]strin
 	}
 
 	svc := service.NewProviderConfigService()
-	names := make([]string, 0, len(providers))
-	for name, opts := range providers {
+	names := orderedProviderNames(providers, cfg.Gateway.DefaultProvider)
+	for _, name := range names {
+		opts := providers[name]
 		if strings.TrimSpace(opts.Provider) == "" {
 			opts.Provider = name
 		}
 		if err := svc.Upsert(name, opts); err != nil {
 			return nil, fmt.Errorf("upsert provider %s: %w", name, err)
 		}
-		names = append(names, name)
 		manifest.Providers = append(manifest.Providers, seedmanifest.ManifestProvider{
 			Name:         name,
 			ProviderType: opts.Provider,
@@ -173,6 +175,28 @@ func seedProviders(cfg *config.Config, manifest *seedmanifest.Manifest) ([]strin
 		})
 	}
 	return names, nil
+}
+
+func orderedProviderNames(providers map[string]types.Options, defaultProvider string) []string {
+	names := make([]string, 0, len(providers))
+	for name := range providers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	defaultProvider = strings.TrimSpace(defaultProvider)
+	if defaultProvider == "" {
+		return names
+	}
+	for i, name := range names {
+		if name != defaultProvider {
+			continue
+		}
+		copy(names[1:i+1], names[:i])
+		names[0] = name
+		break
+	}
+	return names
 }
 
 func seedPricing(providerNames []string) error {

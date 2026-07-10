@@ -86,8 +86,12 @@ func (p *GLMProvider) AudioSpeech(ctx context.Context, req map[string]interface{
 	return nil, fmt.Errorf("glm does not support audio speech")
 }
 
-func (p *GLMProvider) AudioTranscription(ctx context.Context, req map[string]interface{}, opts *types.Options) (*http.Response, error) {
+func (p *GLMProvider) AudioTranscription(ctx context.Context, req *types.AudioRequest, opts *types.Options) (*http.Response, error) {
 	return nil, fmt.Errorf("glm does not support audio transcription")
+}
+
+func (p *GLMProvider) AudioTranslation(ctx context.Context, req *types.AudioRequest, opts *types.Options) (*http.Response, error) {
+	return nil, fmt.Errorf("glm does not support audio translation")
 }
 
 func (p *GLMProvider) Models(ctx context.Context, opts *types.Options) (*http.Response, error) {

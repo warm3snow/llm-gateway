@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"mime/multipart"
 	"net/http"
 	"time"
 
@@ -133,9 +135,61 @@ func (p *OpenAIProvider) AudioSpeech(ctx context.Context, req map[string]interfa
 }
 
 // AudioTranscription 语音转文本
-func (p *OpenAIProvider) AudioTranscription(ctx context.Context, req map[string]interface{}, opts *types.Options) (*http.Response, error) {
-	// TODO: construct multipart form-data request for audio file upload
-	return nil, fmt.Errorf("AudioTranscription not yet implemented")
+func (p *OpenAIProvider) AudioTranscription(ctx context.Context, req *types.AudioRequest, opts *types.Options) (*http.Response, error) {
+	return p.sendAudioRequest(ctx, "/audio/transcriptions", req)
+}
+
+// AudioTranslation 语音翻译
+func (p *OpenAIProvider) AudioTranslation(ctx context.Context, req *types.AudioRequest, opts *types.Options) (*http.Response, error) {
+	return p.sendAudioRequest(ctx, "/audio/translations", req)
+}
+
+func (p *OpenAIProvider) sendAudioRequest(ctx context.Context, endpoint string, req *types.AudioRequest) (*http.Response, error) {
+	if req == nil || req.FileHeader == nil {
+		return nil, fmt.Errorf("audio file is required")
+	}
+
+	file, err := req.FileHeader.Open()
+	if err != nil {
+		return nil, fmt.Errorf("failed to open audio file: %w", err)
+	}
+	defer file.Close()
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", req.FileHeader.Filename)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create audio file part: %w", err)
+	}
+	if _, err := io.Copy(part, file); err != nil {
+		return nil, fmt.Errorf("failed to copy audio file: %w", err)
+	}
+	for name, values := range req.Fields {
+		if name == "file" {
+			continue
+		}
+		for _, value := range values {
+			if err := writer.WriteField(name, value); err != nil {
+				return nil, fmt.Errorf("failed to write audio field %q: %w", name, err)
+			}
+		}
+	}
+	if err := writer.Close(); err != nil {
+		return nil, fmt.Errorf("failed to finalize audio request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, p.BaseURL+endpoint, &body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+p.APIKey)
+	httpReq.Header.Set("Content-Type", writer.FormDataContentType())
+
+	resp, err := p.HTTPClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to send request: %w", err)
+	}
+	return resp, nil
 }
 
 // Models 获取模型列表

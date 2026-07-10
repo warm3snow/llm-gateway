@@ -11,7 +11,7 @@ import {
 import { currentRole } from "@/lib/api";
 import type { VirtualKey } from "@/lib/types";
 import { PageHeader } from "@/components/ui/page-header";
-import { Panel, PanelHeader, PanelTitle, PanelBody } from "@/components/ui/panel";
+import { Panel, PanelHeader, PanelBody } from "@/components/ui/panel";
 import { Led } from "@/components/ui/led";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -45,6 +45,8 @@ function parseProviders(value?: string) {
   return value.split(",").map((p) => p.trim()).filter(Boolean);
 }
 
+const defaultRateLimit = "60";
+
 export default function VirtualKeysPage() {
   const { data: keys, isLoading } = useVirtualKeys();
   const { data: providers } = useProviders();
@@ -54,6 +56,7 @@ export default function VirtualKeysPage() {
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
   const [budget, setBudget] = useState("");
+  const [rateLimit, setRateLimit] = useState(defaultRateLimit);
   const [editOpen, setEditOpen] = useState(false);
   const [editing, setEditing] = useState<VirtualKey | null>(null);
   const [editName, setEditName] = useState("");
@@ -69,6 +72,7 @@ export default function VirtualKeysPage() {
   function resetForm() {
     setName("");
     setBudget("");
+    setRateLimit(defaultRateLimit);
   }
 
   async function handleCreate(e: React.FormEvent) {
@@ -78,6 +82,8 @@ export default function VirtualKeysPage() {
       await createMut.mutateAsync({
         name: name.trim(),
         ...(canSetBudget ? { budget_total: parseFloat(budget) || 0 } : {}),
+        rate_limit: parseInt(rateLimit, 10) || 0,
+        rate_limit_window: 60,
       });
       toast.success("virtual key created", {
         description: name.trim(),
@@ -196,6 +202,16 @@ export default function VirtualKeysPage() {
                     />
                   </div>
                 )}
+                <div className="space-y-2">
+                  <Label htmlFor="k-rate-limit">rate limit (per min)</Label>
+                  <Input
+                    id="k-rate-limit"
+                    type="number"
+                    value={rateLimit}
+                    onChange={(e) => setRateLimit(e.target.value)}
+                    min="0"
+                  />
+                </div>
                 <SheetFooter className="mt-auto flex-row gap-2 border-t border-border pt-4">
                   <Button
                     type="button"

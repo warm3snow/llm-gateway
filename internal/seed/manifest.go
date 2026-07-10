@@ -9,12 +9,13 @@ import (
 
 // Manifest records the seed output needed by follow-up local tooling.
 type Manifest struct {
-	Profile     string             `json:"profile"`
-	BaseURL     string             `json:"base_url"`
-	Tenants     []ManifestTenant   `json:"tenants"`
-	Users       []ManifestUser     `json:"users"`
-	Providers   []ManifestProvider `json:"providers"`
-	VirtualKeys []ManifestKey      `json:"virtual_keys"`
+	Profile         string             `json:"profile"`
+	BaseURL         string             `json:"base_url"`
+	DefaultProvider string             `json:"default_provider,omitempty"`
+	Tenants         []ManifestTenant   `json:"tenants"`
+	Users           []ManifestUser     `json:"users"`
+	Providers       []ManifestProvider `json:"providers"`
+	VirtualKeys     []ManifestKey      `json:"virtual_keys"`
 }
 
 type ManifestTenant struct {

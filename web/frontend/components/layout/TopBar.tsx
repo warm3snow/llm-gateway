@@ -19,6 +19,7 @@ import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { api, currentTenant, currentUser } from "@/lib/api";
+import { CommandPalette } from "@/components/layout/CommandPalette";
 
 const segmentLabels: Record<string, string> = {
   dashboard: "dashboard",
@@ -26,6 +27,8 @@ const segmentLabels: Record<string, string> = {
   "virtual-keys": "virtual-keys",
   logs: "logs",
   analytics: "analytics",
+  tenants: "tenants",
+  users: "users",
   settings: "settings",
 };
 
@@ -37,6 +40,7 @@ export default function TopBar({
   const pathname = usePathname();
   const { resolvedTheme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [changingPassword, setChangingPassword] = useState(false);
@@ -47,6 +51,7 @@ export default function TopBar({
   const tenantMeta = session.tenant
     ? `${session.tenant.slug} · ${session.tenant.role}`
     : session.user?.role;
+
   useEffect(() => {
     const frame = requestAnimationFrame(() => setMounted(true));
     return () => cancelAnimationFrame(frame);
@@ -119,12 +124,14 @@ export default function TopBar({
       </nav>
 
       <div className="ml-auto flex items-center gap-1.5">
-        {/* Command palette trigger (visual only — wiring is a future task) */}
         <Button
+          type="button"
           variant="ghost"
           size="sm"
           className="hidden h-8 gap-2 font-mono text-[11px] text-muted-foreground hover:text-foreground sm:flex"
           aria-label="Search"
+          aria-expanded={searchOpen}
+          onClick={() => setSearchOpen(true)}
         >
           <Search className="h-3.5 w-3.5" />
           <span>search</span>
@@ -238,6 +245,8 @@ export default function TopBar({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+
+      <CommandPalette open={searchOpen} onOpenChange={setSearchOpen} />
     </header>
   );
 }

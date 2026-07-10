@@ -1,6 +1,6 @@
 "use client";
 
-import { useStats, useProviders, useUsage } from "@/lib/queries";
+import { useStats, useProviders, useUsage, useHourlyStats, useActiveAlerts } from "@/lib/queries";
 import { PageHeader } from "@/components/ui/page-header";
 import { Panel, PanelHeader, PanelTitle, PanelBody } from "@/components/ui/panel";
 import { StatTile } from "@/components/ui/stat-tile";
@@ -14,6 +14,7 @@ import {
   Activity,
   Zap,
   Server,
+  AlertTriangle,
   ArrowRight,
 } from "lucide-react";
 import Link from "next/link";
@@ -26,7 +27,7 @@ import {
   YAxis,
   CartesianGrid,
 } from "recharts";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { currentRole } from "@/lib/api";
 import { roleScopeLabel } from "@/components/auth/RoleGate";
 
@@ -49,25 +50,14 @@ export default function DashboardPage() {
   const statsQ = useStats();
   const providersQ = useProviders();
   const logsQ = useUsage({ limit: 100, offset: 0 });
+  const hourlyQ = useHourlyStats({ hours: 24 * 14 });
+  const alertsQ = useActiveAlerts();
 
   const stats = statsQ.data;
   const providers = providersQ.data ?? [];
   const logs = logsQ.data?.records ?? [];
-
-  // Synthesize a small spark series from recent logs so the chart always has
-  // something to show. In a real deployment the backend would provide this.
-  const series = useMemo(() => {
-    if (!logs.length) return [];
-    const byDay = new Map<string, number>();
-    for (const l of logs) {
-      const d = new Date(l.created_at);
-      const key = `${d.getMonth() + 1}/${d.getDate()}`;
-      byDay.set(key, (byDay.get(key) ?? 0) + 1);
-    }
-    return Array.from(byDay.entries())
-      .map(([date, count]) => ({ date, count }))
-      .slice(-14);
-  }, [logs]);
+  const series = hourlyQ.data?.timeSeries ?? [];
+  const activeAlerts = alertsQ.data ?? [];
 
   const recentLogs = logs.slice(0, 6);
   const activeProviders = providers.filter((p) => p.enabled);
@@ -169,7 +159,7 @@ export default function DashboardPage() {
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Request volume chart */}
         <Panel className="lg:col-span-2">
-          {logsQ.isLoading && <LoadingBar />}
+          {hourlyQ.isLoading && <LoadingBar />}
           <PanelHeader>
             <div className="flex items-center gap-2">
               <Activity className="h-3.5 w-3.5 text-accent" />
@@ -302,6 +292,27 @@ export default function DashboardPage() {
           </PanelBody>
         </Panel>
       </div>
+
+      {activeAlerts.length > 0 && (
+        <Panel className="mt-6 border-warning/40 bg-warning/5">
+          <PanelHeader>
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="h-3.5 w-3.5 text-warning" />
+              <PanelTitle>active alerts</PanelTitle>
+            </div>
+            <Badge variant="warning">{activeAlerts.length}</Badge>
+          </PanelHeader>
+          <div className="divide-y divide-warning/20">
+            {activeAlerts.slice(0, 4).map((alert) => (
+              <div key={alert.id} className="grid grid-cols-12 gap-3 px-4 py-2.5 font-mono text-[11px]">
+                <div className="col-span-2 text-warning">vkey:{alert.virtual_key_id}</div>
+                <div className="col-span-8 truncate text-foreground">{alert.message}</div>
+                <div className="col-span-2 text-right num text-muted-foreground">{alert.value.toFixed(2)}</div>
+              </div>
+            ))}
+          </div>
+        </Panel>
+      )}
 
       {/* Bottom row — recent activity feed */}
       <Panel className="mt-6">

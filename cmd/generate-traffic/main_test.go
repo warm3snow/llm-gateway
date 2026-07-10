@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	seedmanifest "github.com/warm3snow/llm-gateway/internal/seed"
 )
 
 func TestApplyScenarioDefaults(t *testing.T) {
@@ -107,6 +109,33 @@ func TestReadStreamingBodyPropagatesReadErrors(t *testing.T) {
 	_, _, err := readStreamingBody(errReader{}, time.Now())
 	if err == nil {
 		t.Fatalf("expected read error")
+	}
+}
+
+func TestFirstProviderPrefersManifestDefaultProvider(t *testing.T) {
+	manifest := &seedmanifest.Manifest{
+		DefaultProvider: "ollama",
+		Providers: []seedmanifest.ManifestProvider{
+			{Name: "deepseek"},
+			{Name: "ollama"},
+		},
+	}
+
+	if got := firstProvider(manifest); got != "ollama" {
+		t.Fatalf("firstProvider() = %q, want %q", got, "ollama")
+	}
+}
+
+func TestFirstProviderFallsBackForOldManifest(t *testing.T) {
+	manifest := &seedmanifest.Manifest{
+		Providers: []seedmanifest.ManifestProvider{
+			{Name: "deepseek"},
+			{Name: "ollama"},
+		},
+	}
+
+	if got := firstProvider(manifest); got != "deepseek" {
+		t.Fatalf("firstProvider() = %q, want %q", got, "deepseek")
 	}
 }
 

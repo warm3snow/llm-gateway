@@ -753,12 +753,49 @@ func (h *ProxyHandler) HandleAudioSpeech(c *gin.Context) {
 
 // HandleAudioTranscription 处理语音转文本请求
 func (h *ProxyHandler) HandleAudioTranscription(c *gin.Context) {
-	// TODO: multipart/form-data audio upload not yet supported by the provider layer.
-	h.abortWithError(c, http.StatusNotImplemented, "not_implemented", "Audio transcription not implemented yet")
+	h.handleAudioUpload(c, func(prov provider.Provider, req *types.AudioRequest, opts *types.Options) (*http.Response, error) {
+		return prov.AudioTranscription(c.Request.Context(), req, opts)
+	})
 }
 
 // HandleAudioTranslation 处理语音翻译请求
 func (h *ProxyHandler) HandleAudioTranslation(c *gin.Context) {
-	// TODO: multipart/form-data audio upload not yet supported by the provider layer.
-	h.abortWithError(c, http.StatusNotImplemented, "not_implemented", "Audio translation not implemented yet")
+	h.handleAudioUpload(c, func(prov provider.Provider, req *types.AudioRequest, opts *types.Options) (*http.Response, error) {
+		return prov.AudioTranslation(c.Request.Context(), req, opts)
+	})
+}
+
+func (h *ProxyHandler) handleAudioUpload(c *gin.Context, call func(provider.Provider, *types.AudioRequest, *types.Options) (*http.Response, error)) {
+	req, err := parseAudioRequest(c)
+	if err != nil {
+		h.abortWithError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		return
+	}
+
+	opts := h.getOptionsFromContext(c)
+	prov, err := h.ProviderFactory.Create(opts.Provider, opts)
+	if err != nil {
+		h.abortWithError(c, http.StatusInternalServerError, "provider_error", fmt.Sprintf("Failed to create provider: %v", err))
+		return
+	}
+
+	resp, err := call(prov, req, opts)
+	if err != nil {
+		h.abortWithError(c, http.StatusInternalServerError, "request_error", fmt.Sprintf("Request failed: %v", err))
+		return
+	}
+	defer resp.Body.Close()
+
+	h.handleResponse(c, resp)
+}
+
+func parseAudioRequest(c *gin.Context) (*types.AudioRequest, error) {
+	if err := c.Request.ParseMultipartForm(32 << 20); err != nil {
+		return nil, fmt.Errorf("audio request must be multipart/form-data: %w", err)
+	}
+	form := c.Request.MultipartForm
+	if form == nil || len(form.File["file"]) == 0 {
+		return nil, fmt.Errorf("audio file is required")
+	}
+	return &types.AudioRequest{FileHeader: form.File["file"][0], Fields: form.Value}, nil
 }

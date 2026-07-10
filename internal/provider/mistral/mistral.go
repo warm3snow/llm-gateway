@@ -14,7 +14,7 @@ import (
 
 const (
 	DefaultBaseURL = "https://api.mistral.ai/v1"
-	DefaultTimeout  = 120 * time.Second
+	DefaultTimeout = 120 * time.Second
 )
 
 type MistralProvider struct {
@@ -55,7 +55,7 @@ func NewMistralProvider(opts *types.Options) (provider.Provider, error) {
 	}, nil
 }
 
-func (p *MistralProvider) GetName() string  { return p.Name }
+func (p *MistralProvider) GetName() string    { return p.Name }
 func (p *MistralProvider) GetBaseURL() string { return p.BaseURL }
 func (p *MistralProvider) GetEndpoints() []string {
 	eps := make([]string, 0, len(p.Endpoints))
@@ -111,8 +111,12 @@ func (p *MistralProvider) AudioSpeech(ctx context.Context, req map[string]interf
 	return nil, fmt.Errorf("mistral does not support audio speech")
 }
 
-func (p *MistralProvider) AudioTranscription(ctx context.Context, req map[string]interface{}, opts *types.Options) (*http.Response, error) {
+func (p *MistralProvider) AudioTranscription(ctx context.Context, req *types.AudioRequest, opts *types.Options) (*http.Response, error) {
 	return nil, fmt.Errorf("mistral does not support audio transcription")
+}
+
+func (p *MistralProvider) AudioTranslation(ctx context.Context, req *types.AudioRequest, opts *types.Options) (*http.Response, error) {
+	return nil, fmt.Errorf("mistral does not support audio translation")
 }
 
 func (p *MistralProvider) Models(ctx context.Context, opts *types.Options) (*http.Response, error) {

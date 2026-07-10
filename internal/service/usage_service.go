@@ -21,8 +21,14 @@ func NewUsageService() *UsageService {
 }
 
 // GetRecords returns paginated usage records filtered by access scope,
-// provider/model/status, and a created_at date window.
+// provider/model/exact status code, and a created_at date window.
 func (s *UsageService) GetRecords(scope AccessScope, provider, model string, statusCode int, startDate, endDate time.Time, limit, offset int) ([]models.UsageRecord, int64, error) {
+	return s.GetRecordsWithStatus(scope, provider, model, "", statusCode, startDate, endDate, limit, offset)
+}
+
+// GetRecordsWithStatus returns paginated usage records with either an exact
+// status_code filter or a status family filter: success (<400) / error (>=400).
+func (s *UsageService) GetRecordsWithStatus(scope AccessScope, provider, model, status string, statusCode int, startDate, endDate time.Time, limit, offset int) ([]models.UsageRecord, int64, error) {
 	var records []models.UsageRecord
 	var total int64
 
@@ -34,9 +40,7 @@ func (s *UsageService) GetRecords(scope AccessScope, provider, model string, sta
 	if model != "" {
 		query = query.Where("model = ?", model)
 	}
-	if statusCode > 0 {
-		query = query.Where("status_code = ?", statusCode)
-	}
+	query = applyUsageStatusFilter(query, status, statusCode)
 	if !startDate.IsZero() {
 		query = query.Where("created_at >= ?", startDate)
 	}

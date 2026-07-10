@@ -17,7 +17,7 @@ type VirtualKey struct {
 	BudgetTotal       float64    `gorm:"type:decimal(10,2);default:0" json:"budget_total"`
 	BudgetUsed        float64    `gorm:"type:decimal(10,2);default:0" json:"budget_used"`
 	BudgetResetAt     *time.Time `json:"budget_reset_at,omitempty"`
-	RateLimit         int        `gorm:"default:0" json:"rate_limit"`            // requests per minute, 0 = unlimited
+	RateLimit         int        `gorm:"default:0" json:"rate_limit"`            // requests per minute, create default = 60, 0 = unlimited
 	RateLimitWindow   int        `gorm:"default:60" json:"rate_limit_window"`    // window in seconds
 	Providers         string     `gorm:"type:text" json:"providers,omitempty"`   // JSON array of allowed provider names
 	Status            string     `gorm:"size:20;default:'active'" json:"status"` // active, inactive, expired
@@ -36,7 +36,7 @@ func (VirtualKey) TableName() string {
 type VirtualKeyRequest struct {
 	Name            string   `json:"name" binding:"required"`
 	BudgetTotal     float64  `json:"budget_total"`
-	RateLimit       int      `json:"rate_limit"`
+	RateLimit       *int     `json:"rate_limit"`
 	RateLimitWindow int      `json:"rate_limit_window"`
 	Providers       []string `json:"providers"`
 	Metadata        string   `json:"metadata"`

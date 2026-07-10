@@ -242,10 +242,7 @@ func TestAnthropicProvider_AudioTranscription(t *testing.T) {
 	assert.NoError(t, err)
 
 	ctx := context.Background()
-	req := map[string]interface{}{
-		"model": "claude-3-opus-20240229",
-		"audio": "base64audio",
-	}
+	req := &types.AudioRequest{Fields: map[string][]string{"model": {"claude-3-opus-20240229"}}}
 
 	resp, err := prov.AudioTranscription(ctx, req, opts)
 	assert.Error(t, err)

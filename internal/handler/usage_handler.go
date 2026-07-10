@@ -63,6 +63,14 @@ func (h *UsageHandler) RegisterRoutesWithAuth(router *gin.Engine, jwtMiddleware 
 func (h *UsageHandler) GetRecords(c *gin.Context) {
 	provider := c.Query("provider")
 	model := c.Query("model")
+	status := c.Query("status")
+	if !service.IsValidUsageStatus(status) {
+		c.AbortWithStatusJSON(http.StatusBadRequest, types.ErrorResponse{
+			Message: "status must be success or error",
+			Type:    "invalid_request_error",
+		})
+		return
+	}
 	statusCode, _ := strconv.Atoi(c.Query("status_code"))
 
 	var startDate, endDate time.Time
@@ -85,7 +93,7 @@ func (h *UsageHandler) GetRecords(c *gin.Context) {
 		return
 	}
 
-	records, total, err := h.service.GetRecords(scope, provider, model, statusCode, startDate, endDate, limit, offset)
+	records, total, err := h.service.GetRecordsWithStatus(scope, provider, model, status, statusCode, startDate, endDate, limit, offset)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, types.ErrorResponse{
 			Message: "Failed to get usage records",

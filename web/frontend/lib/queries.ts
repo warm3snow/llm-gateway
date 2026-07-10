@@ -9,9 +9,13 @@ import type {
   AnalyticsData,
   Provider,
   ProvidersResponse,
+  ProviderHealth,
+  AlertEvent,
   VirtualKey,
   VirtualKeysResponse,
   UsageResponse,
+  UsageStatus,
+  TimeSeriesResponse,
   ServerConfig,
 } from "./types";
 
@@ -21,7 +25,10 @@ type UpdateVirtualKeyData = Parameters<typeof api.updateVirtualKey>[1];
 export const queryKeys = {
   stats: ["stats"] as const,
   analytics: ["analytics"] as const,
+  hourlyStats: ["hourlyStats"] as const,
   providers: ["providers"] as const,
+  providerHealth: ["providerHealth"] as const,
+  activeAlerts: ["activeAlerts"] as const,
   virtualKeys: ["virtualKeys"] as const,
   usage: ["usage"] as const,
   config: ["config"] as const,
@@ -41,10 +48,31 @@ export function useAnalytics(params?: { tenant_id?: number }) {
   });
 }
 
+export function useHourlyStats(params?: { hours?: number; status?: UsageStatus; status_code?: number }) {
+  return useQuery<TimeSeriesResponse>({
+    queryKey: [queryKeys.hourlyStats[0], params?.hours, params?.status, params?.status_code],
+    queryFn: () => api.getHourlyStats(params),
+  });
+}
+
 export function useProviders() {
   return useQuery<Provider[]>({
     queryKey: queryKeys.providers,
     queryFn: async () => (await api.getProviders()).data,
+  });
+}
+
+export function useProviderHealth() {
+  return useQuery<ProviderHealth[]>({
+    queryKey: queryKeys.providerHealth,
+    queryFn: async () => (await api.getProviderHealth()).providers,
+  });
+}
+
+export function useActiveAlerts() {
+  return useQuery<AlertEvent[]>({
+    queryKey: queryKeys.activeAlerts,
+    queryFn: async () => (await api.getActiveAlerts()).events,
   });
 }
 
@@ -85,13 +113,25 @@ export function useUsage(params?: {
   offset?: number;
   provider?: string;
   model?: string;
+  status?: UsageStatus;
   status_code?: number;
   tenant_id?: number;
   start_date?: string;
   end_date?: string;
 }) {
   return useQuery<UsageResponse>({
-    queryKey: [...queryKeys.usage, params],
+    queryKey: [
+      queryKeys.usage[0],
+      params?.limit,
+      params?.offset,
+      params?.provider,
+      params?.model,
+      params?.status,
+      params?.status_code,
+      params?.tenant_id,
+      params?.start_date,
+      params?.end_date,
+    ],
     queryFn: () => api.getUsage(params),
   });
 }

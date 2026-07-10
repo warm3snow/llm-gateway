@@ -1,8 +1,10 @@
 package openai
 
 import (
+	"bytes"
 	"context"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -376,6 +378,51 @@ func TestOpenAIProvider_StreamRequest(t *testing.T) {
 	assert.NotNil(t, resp)
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 	assert.Equal(t, "text/event-stream", resp.Header.Get("Content-Type"))
+}
+
+func TestOpenAIProvider_AudioTranscriptionForwardsMultipart(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/audio/transcriptions", r.URL.Path)
+		assert.Equal(t, "Bearer sk-test", r.Header.Get("Authorization"))
+		assert.Contains(t, r.Header.Get("Content-Type"), "multipart/form-data")
+		assert.NoError(t, r.ParseMultipartForm(32<<20))
+		assert.Equal(t, "whisper-1", r.FormValue("model"))
+		file, _, err := r.FormFile("file")
+		assert.NoError(t, err)
+		defer file.Close()
+		content, err := io.ReadAll(file)
+		assert.NoError(t, err)
+		assert.Equal(t, "audio-bytes", string(content))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"text":"hello"}`))
+	}))
+	defer server.Close()
+
+	prov, err := NewOpenAIProvider(&types.Options{Provider: "openai", APIKey: "sk-test", CustomHost: server.URL})
+	assert.NoError(t, err)
+
+	resp, err := prov.AudioTranscription(context.Background(), testAudioRequest(t), &types.Options{})
+	assert.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func testAudioRequest(t *testing.T) *types.AudioRequest {
+	t.Helper()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "sample.wav")
+	assert.NoError(t, err)
+	_, err = part.Write([]byte("audio-bytes"))
+	assert.NoError(t, err)
+	assert.NoError(t, writer.WriteField("model", "whisper-1"))
+	assert.NoError(t, writer.Close())
+
+	req := httptest.NewRequest(http.MethodPost, "/audio", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	assert.NoError(t, req.ParseMultipartForm(32<<20))
+	return &types.AudioRequest{FileHeader: req.MultipartForm.File["file"][0], Fields: req.MultipartForm.Value}
 }
 
 // BenchmarkOpenAIProvider_ChatCompletion 性能测试

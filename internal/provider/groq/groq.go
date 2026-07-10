@@ -14,7 +14,7 @@ import (
 
 const (
 	DefaultBaseURL = "https://api.groq.com/openai/v1"
-	DefaultTimeout  = 60 * time.Second
+	DefaultTimeout = 60 * time.Second
 )
 
 type GroqProvider struct {
@@ -86,8 +86,12 @@ func (p *GroqProvider) AudioSpeech(ctx context.Context, req map[string]interface
 	return nil, fmt.Errorf("groq does not support audio speech")
 }
 
-func (p *GroqProvider) AudioTranscription(ctx context.Context, req map[string]interface{}, opts *types.Options) (*http.Response, error) {
+func (p *GroqProvider) AudioTranscription(ctx context.Context, req *types.AudioRequest, opts *types.Options) (*http.Response, error) {
 	return nil, fmt.Errorf("groq does not support audio transcription")
+}
+
+func (p *GroqProvider) AudioTranslation(ctx context.Context, req *types.AudioRequest, opts *types.Options) (*http.Response, error) {
+	return nil, fmt.Errorf("groq does not support audio translation")
 }
 
 func (p *GroqProvider) Models(ctx context.Context, opts *types.Options) (*http.Response, error) {

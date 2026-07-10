@@ -2,11 +2,14 @@ import { getCookie, setCookie, deleteCookie } from 'cookies-next';
 import { QueryClient } from '@tanstack/react-query';
 import type {
   DashboardStats,
-  Provider,
   ProvidersResponse,
+  ProviderHealthResponse,
+  AlertEventsResponse,
   VirtualKey,
   VirtualKeysResponse,
   UsageResponse,
+  UsageStatus,
+  TimeSeriesResponse,
   AnalyticsData,
   ServerConfig,
   LoginResponse,
@@ -90,13 +93,26 @@ export const api = {
     const qs = params?.tenant_id ? `?tenant_id=${params.tenant_id}` : '';
     return apiFetch<AnalyticsData>(`/api/v1/stats/analytics${qs}`);
   },
+  getHourlyStats: (params?: { hours?: number; status?: UsageStatus; status_code?: number }) => {
+    const qs = params
+      ? new URLSearchParams(
+          Object.entries(params)
+            .filter(([, v]) => v != null)
+            .map(([k, v]) => [k, String(v)])
+        ).toString()
+      : '';
+    return apiFetch<TimeSeriesResponse>(`/api/v1/stats/hourly${qs ? `?${qs}` : ''}`);
+  },
   getProviders: () => apiFetch<ProvidersResponse>('/api/v1/admin/providers'),
+  getProviderHealth: () => apiFetch<ProviderHealthResponse>('/api/v1/admin/providers/health'),
+  getActiveAlerts: () => apiFetch<AlertEventsResponse>('/api/v1/alerts/events?active=true'),
   getVirtualKeys: () => apiFetch<VirtualKeysResponse>('/api/v1/virtual-keys'),
   getUsage: (params?: {
     limit?: number;
     offset?: number;
     provider?: string;
     model?: string;
+    status?: UsageStatus;
     status_code?: number;
     tenant_id?: number;
     start_date?: string;
@@ -144,7 +160,7 @@ export const api = {
     apiFetch<void>(`/api/v1/admin/providers/${encodeURIComponent(name)}`, {
       method: 'DELETE',
     }),
-  createVirtualKey: (data: { name: string; budget_total?: number }) =>
+  createVirtualKey: (data: { name: string; budget_total?: number; rate_limit?: number; rate_limit_window?: number }) =>
     apiFetch<VirtualKey>('/api/v1/virtual-keys', {
       method: 'POST',
       body: JSON.stringify(data),

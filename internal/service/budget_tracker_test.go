@@ -21,7 +21,7 @@ func setupBudgetTrackerTestDB(t *testing.T) {
 		_ = database.Close()
 		database.DB = nil
 	})
-	if err := database.Migrate(&models.Tenant{}, &models.VirtualKey{}); err != nil {
+	if err := database.Migrate(&models.Tenant{}, &models.VirtualKey{}, &models.AlertRule{}, &models.AlertEvent{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 }

@@ -141,8 +141,12 @@ func (p *AnthropicProvider) AudioSpeech(ctx context.Context, req map[string]inte
 }
 
 // AudioTranscription 语音转文本（Anthropic 不支持）
-func (p *AnthropicProvider) AudioTranscription(ctx context.Context, req map[string]interface{}, opts *types.Options) (*http.Response, error) {
+func (p *AnthropicProvider) AudioTranscription(ctx context.Context, req *types.AudioRequest, opts *types.Options) (*http.Response, error) {
 	return nil, fmt.Errorf("anthropic does not support audio transcription")
+}
+
+func (p *AnthropicProvider) AudioTranslation(ctx context.Context, req *types.AudioRequest, opts *types.Options) (*http.Response, error) {
+	return nil, fmt.Errorf("anthropic does not support audio translation")
 }
 
 // Models 获取模型列表
@@ -310,7 +314,7 @@ func convertAnthropicToOpenAIFormat(anthropicResp map[string]interface{}) map[st
 		// 将 float64 转换为 int (JSON 数字默认是 float64)
 		inputTokens := int(usage["input_tokens"].(float64))
 		outputTokens := int(usage["output_tokens"].(float64))
-		
+
 		openaiResp["usage"] = map[string]interface{}{
 			"prompt_tokens":     inputTokens,
 			"completion_tokens": outputTokens,

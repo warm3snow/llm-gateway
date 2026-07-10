@@ -62,7 +62,7 @@ func NewGeminiProvider(opts *types.Options) (provider.Provider, error) {
 	}, nil
 }
 
-func (p *GeminiProvider) GetName() string  { return p.Name }
+func (p *GeminiProvider) GetName() string    { return p.Name }
 func (p *GeminiProvider) GetBaseURL() string { return p.BaseURL }
 func (p *GeminiProvider) GetEndpoints() []string {
 	eps := make([]string, 0, len(p.Endpoints))
@@ -147,8 +147,12 @@ func (p *GeminiProvider) AudioSpeech(ctx context.Context, req map[string]interfa
 }
 
 // AudioTranscription 语音转文本 — Gemini 不支持
-func (p *GeminiProvider) AudioTranscription(ctx context.Context, req map[string]interface{}, opts *types.Options) (*http.Response, error) {
+func (p *GeminiProvider) AudioTranscription(ctx context.Context, req *types.AudioRequest, opts *types.Options) (*http.Response, error) {
 	return nil, fmt.Errorf("gemini does not support audio transcription")
+}
+
+func (p *GeminiProvider) AudioTranslation(ctx context.Context, req *types.AudioRequest, opts *types.Options) (*http.Response, error) {
+	return nil, fmt.Errorf("gemini does not support audio translation")
 }
 
 // Models 获取模型列表
@@ -219,7 +223,7 @@ func convertChatToGemini(req *types.ChatCompletionRequest) (map[string]interface
 
 	if req.Temperature > 0 {
 		result["generationConfig"] = map[string]interface{}{
-			"temperature":    req.Temperature,
+			"temperature":     req.Temperature,
 			"maxOutputTokens": req.MaxTokens,
 			"topP":            req.TopP,
 		}
@@ -271,15 +275,15 @@ func convertGeminiResponse(resp *http.Response) (*http.Response, error) {
 		"model":   getModelFromGeminiResp(geminiResp),
 		"choices": []map[string]interface{}{
 			{
-				"index":        0,
-				"message":      map[string]interface{}{"role": "assistant", "content": text},
+				"index":         0,
+				"message":       map[string]interface{}{"role": "assistant", "content": text},
 				"finish_reason": "stop",
 			},
 		},
 		"usage": map[string]interface{}{
 			"prompt_tokens":     0,
 			"completion_tokens": len(strings.Split(text, " ")),
-			"total_tokens":     0,
+			"total_tokens":      0,
 		},
 	}
 

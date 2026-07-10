@@ -128,8 +128,12 @@ func (p *DeterministicProvider) AudioSpeech(ctx context.Context, req map[string]
 	return unsupported(ctx, "audio speech")
 }
 
-func (p *DeterministicProvider) AudioTranscription(ctx context.Context, req map[string]interface{}, opts *types.Options) (*http.Response, error) {
+func (p *DeterministicProvider) AudioTranscription(ctx context.Context, req *types.AudioRequest, opts *types.Options) (*http.Response, error) {
 	return unsupported(ctx, "audio transcription")
+}
+
+func (p *DeterministicProvider) AudioTranslation(ctx context.Context, req *types.AudioRequest, opts *types.Options) (*http.Response, error) {
+	return unsupported(ctx, "audio translation")
 }
 
 func (p *DeterministicProvider) Models(ctx context.Context, opts *types.Options) (*http.Response, error) {

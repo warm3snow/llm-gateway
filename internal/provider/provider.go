@@ -35,7 +35,10 @@ type Provider interface {
 	AudioSpeech(ctx context.Context, req map[string]interface{}, opts *types.Options) (*http.Response, error)
 
 	// AudioTranscription 语音转文本
-	AudioTranscription(ctx context.Context, req map[string]interface{}, opts *types.Options) (*http.Response, error)
+	AudioTranscription(ctx context.Context, req *types.AudioRequest, opts *types.Options) (*http.Response, error)
+
+	// AudioTranslation 语音翻译
+	AudioTranslation(ctx context.Context, req *types.AudioRequest, opts *types.Options) (*http.Response, error)
 
 	// Models 获取模型列表
 	Models(ctx context.Context, opts *types.Options) (*http.Response, error)

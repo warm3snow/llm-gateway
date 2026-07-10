@@ -20,6 +20,32 @@ export interface Provider {
   requestTimeout: number;
 }
 
+export interface ProviderHealth {
+  id: number;
+  provider_name: string;
+  provider_type: string;
+  healthy: boolean;
+  status: string;
+  latency_ms: number;
+  error_message?: string;
+  last_checked_at: string;
+  last_success_at?: string;
+  consecutive_errors: number;
+}
+
+export interface AlertEvent {
+  id: number;
+  tenant_id: number;
+  rule_id: number;
+  virtual_key_id: number;
+  status: string;
+  message: string;
+  value: number;
+  threshold: number;
+  fired_at: string;
+  resolved_at?: string;
+}
+
 export interface VirtualKey {
   id: number;
   tenant_id?: number;
@@ -88,10 +114,16 @@ export interface UsageRecord {
   created_at: string;
 }
 
+export type UsageStatus = "success" | "error";
+
 export interface TimeSeriesPoint {
   date: string;
   count: number;
   cost: number;
+}
+
+export interface TimeSeriesResponse {
+  timeSeries: TimeSeriesPoint[];
 }
 
 export interface TopItem {
@@ -132,6 +164,14 @@ export interface ServerConfig {
 // API response wrappers
 export interface ProvidersResponse {
   data: Provider[];
+}
+
+export interface ProviderHealthResponse {
+  providers: ProviderHealth[];
+}
+
+export interface AlertEventsResponse {
+  events: AlertEvent[];
 }
 
 export interface VirtualKeysResponse {

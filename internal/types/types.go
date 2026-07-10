@@ -1,6 +1,9 @@
 package types
 
-import "time"
+import (
+	"mime/multipart"
+	"time"
+)
 
 // Provider 定义 LLM 提供商类型
 type Provider string
@@ -34,6 +37,7 @@ const (
 	StrategyFallback    StrategyMode = "fallback"
 	StrategySingle      StrategyMode = "single"
 	StrategyConditional StrategyMode = "conditional"
+	StrategyABTest      StrategyMode = "ab_test"
 )
 
 // RetrySettings 重试配置
@@ -87,7 +91,19 @@ type Strategy struct {
 	Mode          StrategyMode `json:"mode" yaml:"mode"`
 	OnStatusCodes []int        `json:"onStatusCodes,omitempty" yaml:"onStatusCodes,omitempty"`
 	Conditions    []Condition  `json:"conditions,omitempty" yaml:"conditions,omitempty"`
+	ABTests       []ABTestRule `json:"abTests,omitempty" yaml:"abTests,omitempty"`
 	Default       string       `json:"default,omitempty" yaml:"default,omitempty"`
+}
+
+type ABTestRule struct {
+	Name    string     `json:"name,omitempty" yaml:"name,omitempty"`
+	Model   string     `json:"model,omitempty" yaml:"model,omitempty"`
+	Options []ABBucket `json:"options" yaml:"options"`
+}
+
+type ABBucket struct {
+	Provider string `json:"provider" yaml:"provider"`
+	Weight   int    `json:"weight" yaml:"weight"`
 }
 
 // Condition 条件路由
@@ -114,6 +130,12 @@ type GuardrailConfig struct {
 	Parameters map[string]interface{} `json:"parameters,omitempty" yaml:"parameters,omitempty"`
 	Deny       bool                   `json:"deny,omitempty" yaml:"deny,omitempty"`
 	OnFailure  string                 `json:"onFailure,omitempty" yaml:"onFailure,omitempty"`
+}
+
+// AudioRequest carries multipart audio upload data for transcription and translation endpoints.
+type AudioRequest struct {
+	FileHeader *multipart.FileHeader
+	Fields     map[string][]string
 }
 
 // Message 聊天消息

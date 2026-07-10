@@ -14,7 +14,7 @@ import (
 
 const (
 	DefaultBaseURL = "https://api.deepseek.com/v1"
-	DefaultTimeout  = 120 * time.Second
+	DefaultTimeout = 120 * time.Second
 )
 
 type DeepSeekProvider struct {
@@ -86,8 +86,12 @@ func (p *DeepSeekProvider) AudioSpeech(ctx context.Context, req map[string]inter
 	return nil, fmt.Errorf("deepseek does not support audio speech")
 }
 
-func (p *DeepSeekProvider) AudioTranscription(ctx context.Context, req map[string]interface{}, opts *types.Options) (*http.Response, error) {
+func (p *DeepSeekProvider) AudioTranscription(ctx context.Context, req *types.AudioRequest, opts *types.Options) (*http.Response, error) {
 	return nil, fmt.Errorf("deepseek does not support audio transcription")
+}
+
+func (p *DeepSeekProvider) AudioTranslation(ctx context.Context, req *types.AudioRequest, opts *types.Options) (*http.Response, error) {
+	return nil, fmt.Errorf("deepseek does not support audio translation")
 }
 
 func (p *DeepSeekProvider) Models(ctx context.Context, opts *types.Options) (*http.Response, error) {

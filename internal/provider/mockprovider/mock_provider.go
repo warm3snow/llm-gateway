@@ -58,7 +58,7 @@ func (mr *MockProviderMockRecorder) AudioSpeech(ctx, req, opts any) *gomock.Call
 }
 
 // AudioTranscription mocks base method.
-func (m *MockProvider) AudioTranscription(ctx context.Context, req map[string]any, opts *types.Options) (*http.Response, error) {
+func (m *MockProvider) AudioTranscription(ctx context.Context, req *types.AudioRequest, opts *types.Options) (*http.Response, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "AudioTranscription", ctx, req, opts)
 	ret0, _ := ret[0].(*http.Response)
@@ -70,6 +70,21 @@ func (m *MockProvider) AudioTranscription(ctx context.Context, req map[string]an
 func (mr *MockProviderMockRecorder) AudioTranscription(ctx, req, opts any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AudioTranscription", reflect.TypeOf((*MockProvider)(nil).AudioTranscription), ctx, req, opts)
+}
+
+// AudioTranslation mocks base method.
+func (m *MockProvider) AudioTranslation(ctx context.Context, req *types.AudioRequest, opts *types.Options) (*http.Response, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AudioTranslation", ctx, req, opts)
+	ret0, _ := ret[0].(*http.Response)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// AudioTranslation indicates an expected call of AudioTranslation.
+func (mr *MockProviderMockRecorder) AudioTranslation(ctx, req, opts any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AudioTranslation", reflect.TypeOf((*MockProvider)(nil).AudioTranslation), ctx, req, opts)
 }
 
 // ChatCompletion mocks base method.

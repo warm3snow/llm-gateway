@@ -18,6 +18,8 @@ type VirtualKeyService struct {
 	db *gorm.DB
 }
 
+const DefaultVirtualKeyRateLimit = 60
+
 // NewVirtualKeyService creates a new VirtualKeyService
 func NewVirtualKeyService() *VirtualKeyService {
 	return &VirtualKeyService{
@@ -43,6 +45,11 @@ func (s *VirtualKeyService) Create(tenantID uint, req *models.VirtualKeyRequest,
 	// Hash the key for storage (hash the full key including prefix)
 	keyHash := hashKey(fullKey, salt)
 
+	rateLimit := DefaultVirtualKeyRateLimit
+	if req.RateLimit != nil {
+		rateLimit = *req.RateLimit
+	}
+
 	// Create DB record
 	vk := &models.VirtualKey{
 		TenantID:          tenantID,
@@ -54,7 +61,7 @@ func (s *VirtualKeyService) Create(tenantID uint, req *models.VirtualKeyRequest,
 		HashedKey:         fullKey[:12], // Store first 12 chars (vsk-xxxxxxxx) for identification
 		BudgetTotal:       req.BudgetTotal,
 		BudgetUsed:        0,
-		RateLimit:         req.RateLimit,
+		RateLimit:         rateLimit,
 		RateLimitWindow:   req.RateLimitWindow,
 		Status:            "active",
 	}
@@ -171,8 +178,8 @@ func (s *VirtualKeyService) Update(tenantID, id uint, req *models.VirtualKeyRequ
 	if req.BudgetTotal >= 0 {
 		vk.BudgetTotal = req.BudgetTotal
 	}
-	if req.RateLimit >= 0 {
-		vk.RateLimit = req.RateLimit
+	if req.RateLimit != nil {
+		vk.RateLimit = *req.RateLimit
 	}
 	if req.RateLimitWindow > 0 {
 		vk.RateLimitWindow = req.RateLimitWindow
@@ -211,6 +218,9 @@ func (s *VirtualKeyService) TrackUsage(id uint, cost float64) error {
 	if err := s.db.Model(&models.VirtualKey{}).Where("id = ?", id).
 		UpdateColumn("budget_used", gorm.Expr("budget_used + ?", cost)).Error; err != nil {
 		return fmt.Errorf("failed to track usage: %w", err)
+	}
+	if err := NewAlertService(s.db).CheckVirtualKey(id); err != nil {
+		return fmt.Errorf("failed to check budget alerts: %w", err)
 	}
 	return nil
 }
