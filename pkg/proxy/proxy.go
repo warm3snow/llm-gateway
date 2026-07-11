@@ -326,12 +326,6 @@ func (h *ProxyHandler) getOptionsFromContext(c *gin.Context) *types.Options {
 	if opts.RequestTimeout == 0 {
 		opts.RequestTimeout = h.Config.Gateway.MaxRequestTimeout
 	}
-	if apiKey := c.GetHeader("x-llm-api-key"); apiKey != "" {
-		opts.APIKey = apiKey
-	}
-	if virtualKey := c.GetHeader("x-llm-virtual-key"); virtualKey != "" {
-		opts.VirtualKey = virtualKey
-	}
 
 	return opts
 }

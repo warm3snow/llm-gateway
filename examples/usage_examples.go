@@ -43,7 +43,7 @@ func ChatCompletionExample() {
 	// 设置请求头
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-llm-provider", "openai")
-	req.Header.Set("x-llm-api-key", os.Getenv("OPENAI_API_KEY"))
+	req.Header.Set("x-llm-gateway-api-key", os.Getenv("LLM_GATEWAY_API_KEY"))
 
 	// 发送请求
 	client := &http.Client{Timeout: 30 * time.Second}
@@ -87,7 +87,7 @@ func StreamChatExample() {
 	req, _ := http.NewRequest("POST", GatewayBaseURL+"/chat/completions", bytes.NewBuffer(jsonBody))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-llm-provider", "openai")
-	req.Header.Set("x-llm-api-key", os.Getenv("OPENAI_API_KEY"))
+	req.Header.Set("x-llm-gateway-api-key", os.Getenv("LLM_GATEWAY_API_KEY"))
 
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)
@@ -122,7 +122,7 @@ func EmbeddingExample() {
 	req, _ := http.NewRequest("POST", GatewayBaseURL+"/embeddings", bytes.NewBuffer(jsonBody))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-llm-provider", "openai")
-	req.Header.Set("x-llm-api-key", os.Getenv("OPENAI_API_KEY"))
+	req.Header.Set("x-llm-gateway-api-key", os.Getenv("LLM_GATEWAY_API_KEY"))
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
@@ -140,7 +140,7 @@ func EmbeddingExample() {
 func ModelsExample() {
 	req, _ := http.NewRequest("GET", GatewayBaseURL+"/models", nil)
 	req.Header.Set("x-llm-provider", "openai")
-	req.Header.Set("x-llm-api-key", os.Getenv("OPENAI_API_KEY"))
+	req.Header.Set("x-llm-gateway-api-key", os.Getenv("LLM_GATEWAY_API_KEY"))
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
@@ -169,7 +169,7 @@ func AnthropicExample() {
 	req, _ := http.NewRequest("POST", GatewayBaseURL+"/chat/completions", bytes.NewBuffer(jsonBody))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-llm-provider", "anthropic")
-	req.Header.Set("x-llm-api-key", os.Getenv("ANTHROPIC_API_KEY"))
+	req.Header.Set("x-llm-gateway-api-key", os.Getenv("LLM_GATEWAY_API_KEY"))
 
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)
@@ -196,8 +196,8 @@ func OllamaExample() {
 
 	req, _ := http.NewRequest("POST", GatewayBaseURL+"/chat/completions", bytes.NewBuffer(jsonBody))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-llm-gateway-api-key", os.Getenv("LLM_GATEWAY_API_KEY"))
 	req.Header.Set("x-llm-provider", "ollama")
-	// Ollama 不需要 API key
 
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)
@@ -229,7 +229,7 @@ func LoadBalanceExample() {
 	for i := 0; i < 5; i++ {
 		req, _ := http.NewRequest("POST", GatewayBaseURL+"/chat/completions", bytes.NewBuffer(jsonBody))
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("x-llm-api-key", os.Getenv("LLM_GATEWAY_API_KEY"))
+		req.Header.Set("x-llm-gateway-api-key", os.Getenv("LLM_GATEWAY_API_KEY"))
 
 		client := &http.Client{Timeout: 30 * time.Second}
 		resp, err := client.Do(req)
