@@ -17,6 +17,8 @@ LLM Gateway 是一个用 Go 构建的统一 LLM API 网关：用一套 OpenAI-co
 - 开启内存或 Redis 缓存，降低重复请求成本
 - 通过 Next.js 管理后台维护 provider、虚拟密钥、租户、用户、告警和统计报表
 
+![alt text](assets/dashboard.png)
+
 ## 快速开始
 
 ### 1. 安装依赖

@@ -17,6 +17,8 @@ LLM Gateway is a unified LLM API gateway built with Go. It exposes one OpenAI-co
 - Enable in-memory or Redis caching to reduce repeated request cost
 - Manage providers, virtual keys, tenants, users, alerts, and analytics from the Next.js dashboard
 
+![alt text](assets/dashboard.png)
+
 ## Quick Start
 
 ### 1. Install dependencies
@@ -97,30 +99,30 @@ Client
 
 ## Core Capabilities
 
-| Capability | Description |
-|---|---|
+| Capability             | Description                                                                                                          |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | Multi-provider support | Built-in adapters for OpenAI, Anthropic, Gemini, Azure, DeepSeek, Groq, Mistral, Kimi, GLM, Cohere, Ollama, and more |
-| Unified API | Exposes OpenAI-compatible endpoints to reduce integration work |
-| Virtual keys | Protect real provider keys and track usage and budgets per gateway key |
-| Routing strategies | Supports single provider, load balancing, fallback, and conditional routing |
-| Caching | Supports in-memory and Redis cache backends |
-| Multi-tenancy | Supports tenants, users, roles, and tenant-scoped data isolation |
-| Observability | Provides request logs, usage records, analytics, and Prometheus metrics |
+| Unified API            | Exposes OpenAI-compatible endpoints to reduce integration work                                                       |
+| Virtual keys           | Protect real provider keys and track usage and budgets per gateway key                                               |
+| Routing strategies     | Supports single provider, load balancing, fallback, and conditional routing                                          |
+| Caching                | Supports in-memory and Redis cache backends                                                                          |
+| Multi-tenancy          | Supports tenants, users, roles, and tenant-scoped data isolation                                                     |
+| Observability          | Provides request logs, usage records, analytics, and Prometheus metrics                                              |
 
 ## Common Commands
 
-| Command | Description |
-|---|---|
-| `make deps` | Install backend and frontend dependencies |
-| `make dev` | Start backend and frontend in the foreground |
-| `make start` | Start backend and frontend in the background |
-| `make stop` | Stop local services |
-| `make build` | Build the backend binary and frontend assets |
-| `make test` | Run Go unit tests |
-| `make fmt` | Format Go code |
-| `make seed-demo` | Generate demo data |
-| `make traffic-demo` | Generate demo traffic |
-| `make load-test` | Run load-test scenarios |
+| Command               | Description                                  |
+| --------------------- | -------------------------------------------- |
+| `make deps`         | Install backend and frontend dependencies    |
+| `make dev`          | Start backend and frontend in the foreground |
+| `make start`        | Start backend and frontend in the background |
+| `make stop`         | Stop local services                          |
+| `make build`        | Build the backend binary and frontend assets |
+| `make test`         | Run Go unit tests                            |
+| `make fmt`          | Format Go code                               |
+| `make seed-demo`    | Generate demo data                           |
+| `make traffic-demo` | Generate demo traffic                        |
+| `make load-test`    | Run load-test scenarios                      |
 
 ## Project Structure
 
