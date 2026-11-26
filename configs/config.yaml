@@ -13,8 +13,10 @@ server:
 
 gateway:
     # Fallback provider for requests that do not name one. Provider and model
-    # catalogues are stored in the database.
+    # catalogues are stored in the database; `make seed` provisions the local
+    # ollama provider (qwen2.5:7b) when none exists.
     defaultProvider: ollama
+    defaultModel: qwen2.5:7b
     guardrailsEnabled: true
     maxRequestTimeout: 120000
     # Sensitive-value masking for /v1 requests: values go upstream as stable

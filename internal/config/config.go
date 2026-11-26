@@ -52,6 +52,7 @@ type ServerConfig struct {
 type GatewayConfig struct {
 	ProvidersMu       sync.RWMutex             `mapstructure:"-" json:"-" yaml:"-"`
 	DefaultProvider   string                   `mapstructure:"defaultProvider" json:"defaultProvider" yaml:"defaultProvider"`
+	DefaultModel      string                   `mapstructure:"defaultModel" json:"defaultModel" yaml:"defaultModel"`
 	Providers         map[string]types.Options `mapstructure:"-" json:"-" yaml:"-"`
 	DefaultConfig     *types.Config            `mapstructure:"defaultConfig" json:"defaultConfig" yaml:"defaultConfig"`
 	GuardrailsEnabled bool                     `mapstructure:"guardrailsEnabled" json:"guardrailsEnabled" yaml:"guardrailsEnabled"`
@@ -207,7 +208,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.mode", "release")
 	v.SetDefault("server.pprofEnabled", false)
 
-	v.SetDefault("gateway.defaultProvider", "openai")
+	v.SetDefault("gateway.defaultProvider", "ollama")
+	v.SetDefault("gateway.defaultModel", "qwen2.5:7b")
 	v.SetDefault("gateway.guardrailsEnabled", true)
 	v.SetDefault("gateway.maxRequestTimeout", 120000)
 	v.SetDefault("gateway.redact.enabled", false)
@@ -289,6 +291,7 @@ func SaveConfig(cfg *Config, path string) error {
 	// map); serialize providers without it.
 	v.Set("gateway", map[string]interface{}{
 		"defaultProvider":   cfg.Gateway.DefaultProvider,
+		"defaultModel":      cfg.Gateway.DefaultModel,
 		"defaultConfig":     cfg.Gateway.DefaultConfig,
 		"guardrailsEnabled": cfg.Gateway.GuardrailsEnabled,
 		"maxRequestTimeout": cfg.Gateway.MaxRequestTimeout,

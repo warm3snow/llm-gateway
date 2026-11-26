@@ -120,7 +120,7 @@ Client
 | `make build`        | Build the backend binary and frontend assets |
 | `make test`         | Run Go unit tests                            |
 | `make fmt`          | Format Go code                               |
-| `make seed-demo`    | Generate demo data                           |
+| `make seed`         | Seed dev + demo data (creates the ollama provider) |
 | `make traffic-demo` | Generate demo traffic                        |
 | `make load-test`    | Run load-test scenarios                      |
 

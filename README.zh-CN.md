@@ -120,7 +120,7 @@ Client
 | `make build` | 构建后端二进制和前端产物 |
 | `make test` | 运行 Go 单元测试 |
 | `make fmt` | 格式化 Go 代码 |
-| `make seed-demo` | 生成演示数据 |
+| `make seed` | 生成 dev + demo 数据（自动创建 ollama provider） |
 | `make traffic-demo` | 生成演示流量 |
 | `make load-test` | 运行压测场景 |
 

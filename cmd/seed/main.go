@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -26,6 +27,12 @@ import (
 const (
 	defaultAdminPassword = "admin1"
 	defaultUserPassword  = "user1"
+
+	// The default local provider comes from config, but is provisioned
+	// automatically so `make seed` works on a fresh database.
+	defaultOllamaProvider = "ollama"
+	defaultOllamaHost     = "http://localhost:11434/v1"
+	defaultOllamaModel    = "qwen2.5:7b"
 )
 
 type seedOptions struct {
@@ -38,7 +45,7 @@ type seedOptions struct {
 
 func main() {
 	opts := seedOptions{}
-	flag.StringVar(&opts.Profile, "profile", "demo", "seed profile: dev or demo")
+	flag.StringVar(&opts.Profile, "profile", "demo", "seed profile: dev or demo (both run by default)")
 	flag.StringVar(&opts.ConfigPath, "config", "", "path to config.yaml")
 	flag.StringVar(&opts.ManifestPath, "manifest", "", "manifest output path")
 	flag.StringVar(&opts.BaseURL, "base-url", "", "gateway base URL written to the manifest")
@@ -102,9 +109,6 @@ func run(opts seedOptions) error {
 	if err != nil {
 		return err
 	}
-	if len(providerNames) == 0 {
-		return fmt.Errorf("no providers available; configure gateway.providers before seeding")
-	}
 	if err := seedPricing(providerNames); err != nil {
 		return err
 	}
@@ -162,7 +166,26 @@ func seedProviders(cfg *config.Config, manifest *seedmanifest.Manifest) ([]strin
 	}
 
 	if len(providers) == 0 {
-		return nil, fmt.Errorf("no providers available; add providers via the admin UI before seeding")
+		// Fresh install: provision the local Ollama provider so the gateway
+		// works out of the box with the default model.
+		if err := ensureDefaultProvider(svc); err != nil {
+			return nil, err
+		}
+		rows, err = svc.List()
+		if err != nil {
+			return nil, fmt.Errorf("list providers: %w", err)
+		}
+		providers = make(map[string]types.Options, len(rows))
+		for i := range rows {
+			opts, err := svc.ToOptions(&rows[i])
+			if err != nil {
+				return nil, fmt.Errorf("decode provider %s: %w", rows[i].Name, err)
+			}
+			providers[rows[i].Name] = opts
+		}
+	}
+	if len(providers) == 0 {
+		return nil, fmt.Errorf("no providers available after provisioning the default ollama provider")
 	}
 
 	names := orderedProviderNames(providers, cfg.Gateway.DefaultProvider)
@@ -174,10 +197,38 @@ func seedProviders(cfg *config.Config, manifest *seedmanifest.Manifest) ([]strin
 		manifest.Providers = append(manifest.Providers, seedmanifest.ManifestProvider{
 			Name:         name,
 			ProviderType: opts.Provider,
-			Models:       []string{"default"},
+			Models:       providerModels(name),
 		})
 	}
 	return names, nil
+}
+
+// ensureDefaultProvider creates the local Ollama provider used out of the box.
+func ensureDefaultProvider(svc *service.ProviderConfigService) error {
+	_, err := svc.Create(defaultOllamaProvider, types.Options{
+		Provider:       defaultOllamaProvider,
+		APIKey:         "ollama",
+		CustomHost:     defaultOllamaHost,
+		Weight:         1,
+		RequestTimeout: 30000,
+		Metadata:       map[string]string{"auto_models": defaultOllamaModel},
+	})
+	if errors.Is(err, service.ErrProviderAlreadyExists) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("create default provider %s: %w", defaultOllamaProvider, err)
+	}
+	log.Printf("created default provider %s (%s) with model %s", defaultOllamaProvider, defaultOllamaHost, defaultOllamaModel)
+	return nil
+}
+
+// providerModels lists the models seeded for a provider.
+func providerModels(name string) []string {
+	if name == defaultOllamaProvider {
+		return []string{defaultOllamaModel, "llama3.2"}
+	}
+	return []string{"default"}
 }
 
 func orderedProviderNames(providers map[string]types.Options, defaultProvider string) []string {
@@ -208,9 +259,9 @@ func seedPricing(providerNames []string) error {
 		rows := []*models.ModelPricing{
 			{Provider: provider, Model: "default", InputPrice: 0.00001, OutputPrice: 0.00003, Currency: "USD", Source: "seed"},
 		}
-		if provider == "ollama" {
+		if provider == defaultOllamaProvider {
 			rows = append(rows,
-				&models.ModelPricing{Provider: provider, Model: "qwen2.5:7b", InputPrice: 0.00001, OutputPrice: 0.00003, Currency: "USD", Source: "seed"},
+				&models.ModelPricing{Provider: provider, Model: defaultOllamaModel, InputPrice: 0.00001, OutputPrice: 0.00003, Currency: "USD", Source: "seed"},
 				&models.ModelPricing{Provider: provider, Model: "llama3.2", InputPrice: 0.00001, OutputPrice: 0.00003, Currency: "USD", Source: "seed"},
 			)
 		}

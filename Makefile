@@ -8,7 +8,7 @@ DOCKER_CONTEXT_HOST := $(shell docker context inspect --format '{{json .Endpoint
 TESTCONTAINERS_DOCKER_HOST := $(if $(DOCKER_HOST),$(DOCKER_HOST),$(DOCKER_CONTEXT_HOST))
 TESTCONTAINERS_RYUK := $(if $(TESTCONTAINERS_RYUK_DISABLED),$(TESTCONTAINERS_RYUK_DISABLED),$(if $(filter rancher-desktop,$(shell docker context show 2>/dev/null)),true,false))
 
-.PHONY: all build run dev stop start start-backend start-frontend restart clean test test-unit test-api test-integration test-e2e lint fmt seed-dev seed-demo traffic-demo demo-data load-test load-test-json load-test-stream load-test-soak load-test-capacity-500 load-test-capacity-1000 load-test-capacity-push
+.PHONY: all build run dev stop start start-backend start-frontend restart clean test test-unit test-api test-integration test-e2e lint fmt seed traffic-demo demo-data load-test load-test-json load-test-stream load-test-soak load-test-capacity-500 load-test-capacity-1000 load-test-capacity-push
 
 ## 默认目标
 all: build
@@ -156,17 +156,16 @@ db-reset:
 ## 数据生成
 ## ============================================================
 
-seed-dev:
-	@echo "==> Seeding dev data..."
+## 生成开发数据（dev + demo 两个 profile，含默认 ollama provider）
+seed:
+	@echo "==> Seeding local data (dev + demo)..."
 	go run ./cmd/seed --profile dev
-
-seed-demo:
-	@echo "==> Seeding demo data..."
 	go run ./cmd/seed --profile demo
+	@echo "    Done. Default provider: ollama, default model: $${MODEL:-qwen2.5:7b}"
 
 traffic-demo:
 	@echo "==> Generating demo traffic..."
-	go run ./cmd/generate-traffic --profile demo --provider "$${PROVIDER:-ollama}" --model "$${MODEL:-}" --requests $${REQUESTS:-20} --concurrency $${CONCURRENCY:-2}
+	go run ./cmd/generate-traffic --profile demo --provider "$${PROVIDER:-ollama}" --model "$${MODEL:-qwen2.5:7b}" --requests $${REQUESTS:-20} --concurrency $${CONCURRENCY:-2}
 
 load-test:
 	@echo "==> Running load test..."
@@ -218,7 +217,7 @@ load-test-capacity-1000:
 load-test-capacity-push:
 	@$(MAKE) load-test PROVIDER=deterministic MODEL=deterministic-chat SCENARIO=baseline-nonstream DURATION=$${DURATION:-5m} WARMUP=$${WARMUP:-30s} CONCURRENCY=$${CONCURRENCY:-5000} RPS=$${RPS:-5000} P95_THRESHOLD=0s
 
-demo-data: seed-demo traffic-demo
+demo-data: seed traffic-demo
 
 ## ============================================================
 ## 安装依赖
@@ -265,8 +264,7 @@ help:
 	@echo "    make clean          - 清理构建产物"
 	@echo "    make deps           - 安装所有依赖"
 	@echo "    make db-reset      - 重置数据库"
-	@echo "    make seed-dev       - 生成本地开发 seed 数据"
-	@echo "    make seed-demo      - 生成 demo seed 数据和 manifest"
+	@echo "    make seed           - 生成 dev + demo seed 数据（自动创建 ollama provider）"
 	@echo "    make traffic-demo   - 基于 demo manifest 生成真实代理流量"
 	@echo "    make load-test      - 运行生产化压测场景"
 	@echo "    make load-test-json - 运行压测并输出 JSON 报告"
@@ -275,5 +273,5 @@ help:
 	@echo "    make load-test-capacity-500 - 500 RPS / 500 concurrency / p95 < 100ms"
 	@echo "    make load-test-capacity-1000 - 1000 RPS / 1000 concurrency / p95 < 200ms"
 	@echo "    make load-test-capacity-push - 逐步推到 5000 RPS 查瓶颈"
-	@echo "    make demo-data      - 生成 demo seed 数据并生成流量"
+	@echo "    make demo-data      - 生成 seed 数据并生成 demo 流量"
 	@echo ""
