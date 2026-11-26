@@ -50,7 +50,7 @@ make stop
 
 打开控制台，使用默认管理员账号登录（`admin@llmgw.org / admin123`，生产环境请修改）。
 
-Provider 存放在数据库中（在管理后台 → Providers 页面维护），不写在 `config.yaml` 里。在 Providers 页面添加 provider，按需填写 `apiKey` 和 `customHost`——本地 Ollama 填 `http://localhost:11434/v1`。同时在页面中补充 model 价格，用量统计才能计算成本。
+在 Providers 页面添加 provider，按需填写 `apiKey` 和 `customHost`——本地 Ollama 填 `http://localhost:11434/v1`。同时在页面中补充 model 价格，用量统计才能计算成本。
 
 也可以一键生成 seed 数据（租户、用户、虚拟密钥、演示流量）：
 
@@ -103,34 +103,34 @@ Client
 
 ## 核心能力
 
-| 能力 | 说明 |
-|---|---|
+| 能力        | 说明                                                                                               |
+| ----------- | -------------------------------------------------------------------------------------------------- |
 | 多 Provider | 内置 OpenAI、Anthropic、Gemini、Azure、DeepSeek、Groq、Mistral、Kimi、GLM、Cohere、Ollama 等适配器 |
-| 统一协议 | 对外提供 OpenAI-compatible API，含 SSE 流式与 Anthropic 风格的 `/v1/messages` |
-| 虚拟密钥 | 使用网关密钥隔离真实 provider key，可限制可用 provider/model，按 key 统计用量与预算 |
-| 配额级联 | 月度配额沿 key → 用户 → 租户逐级校验，预算异步记账 |
-| 路由 | Fallback 链 + 每个 provider 独立重试配置；auto 模式按成本/并发/错误率自动选型 |
-| 缓存 | 支持内存缓存和 Redis 缓存，并支持 Idempotency-Key 响应重放 |
-| 隐私脱敏 | 请求/响应中的敏感值用稳定占位符掩码，可在 Settings 中配置 |
-| 多租户 | 支持租户、用户、角色（super_admin / tenant_admin / member）和租户级数据隔离 |
-| 可观测性 | 提供请求日志、用量记录、统计分析、provider 健康检查和 Prometheus metrics |
+| 统一协议    | 对外提供 OpenAI-compatible API，含 SSE 流式与 Anthropic 风格的 `/v1/messages`                    |
+| 虚拟密钥    | 使用网关密钥隔离真实 provider key，可限制可用 provider/model，按 key 统计用量与预算                |
+| 配额级联    | 月度配额沿 key → 用户 → 租户逐级校验，预算异步记账                                               |
+| 路由        | Fallback 链 + 每个 provider 独立重试配置；auto 模式按成本/并发/错误率自动选型                      |
+| 缓存        | 支持内存缓存和 Redis 缓存，并支持 Idempotency-Key 响应重放                                         |
+| 隐私脱敏    | 请求/响应中的敏感值用稳定占位符掩码，可在 Settings 中配置                                          |
+| 多租户      | 支持租户、用户、角色（super_admin / tenant_admin / member）和租户级数据隔离                        |
+| 可观测性    | 提供请求日志、用量记录、统计分析、provider 健康检查和 Prometheus metrics                           |
 
 ## 常用命令
 
-| 命令 | 说明 |
-|---|---|
-| `make deps` | 安装后端和前端依赖 |
-| `make dev` | 前台启动后端和前端 |
-| `make start` | 后台启动后端和前端 |
-| `make restart` | 停止并重新启动本地服务 |
-| `make stop` | 停止本地服务 |
-| `make build` | 构建后端二进制和前端产物 |
-| `make test` | 运行 Go 单元测试 |
-| `make lint` | 运行 Go 代码检查（`golangci-lint`） |
-| `make fmt` | 格式化 Go 代码 |
-| `make seed` | 生成 seed 数据（租户、用户、ollama provider、虚拟密钥）并调用网关生成流量 |
-| `make traffic-demo` | 生成演示流量 |
-| `make load-test` | 运行压测场景（另有 `-json`、`-stream`、`-soak` 与容量目标命令） |
+| 命令                  | 说明                                                                      |
+| --------------------- | ------------------------------------------------------------------------- |
+| `make deps`         | 安装后端和前端依赖                                                        |
+| `make dev`          | 前台启动后端和前端                                                        |
+| `make start`        | 后台启动后端和前端                                                        |
+| `make restart`      | 停止并重新启动本地服务                                                    |
+| `make stop`         | 停止本地服务                                                              |
+| `make build`        | 构建后端二进制和前端产物                                                  |
+| `make test`         | 运行 Go 单元测试                                                          |
+| `make lint`         | 运行 Go 代码检查（`golangci-lint`）                                     |
+| `make fmt`          | 格式化 Go 代码                                                            |
+| `make seed`         | 生成 seed 数据（租户、用户、ollama provider、虚拟密钥）并调用网关生成流量 |
+| `make traffic-demo` | 生成演示流量                                                              |
+| `make load-test`    | 运行压测场景（另有 `-json`、`-stream`、`-soak` 与容量目标命令）     |
 
 ## 项目结构
 

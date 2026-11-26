@@ -50,7 +50,7 @@ make stop
 
 Open the dashboard and sign in with the default admin account (`admin@llmgw.org / admin123`, change it in production).
 
-Providers are managed in the database (admin console → Providers), not in `config.yaml`. On the Providers page, add a provider with its `apiKey` and `customHost` — for local Ollama, use `http://localhost:11434/v1`. On the same page, fill in the model prices so usage tracking can compute costs.
+On the Providers page, add a provider with its `apiKey` and `customHost` — for local Ollama, use `http://localhost:11434/v1`. On the same page, fill in the model prices so usage tracking can compute costs.
 
 Alternatively, generate seed data (tenants, users, virtual keys, demo traffic) with:
 
@@ -117,20 +117,20 @@ Requests with `model: "auto"` are scored across enabled provider/model pairs (co
 
 ## Common Commands
 
-| Command               | Description                                                                        |
-| --------------------- | ---------------------------------------------------------------------------------- |
-| `make deps`         | Install backend and frontend dependencies                                          |
-| `make dev`          | Start backend and frontend in the foreground                                       |
-| `make start`        | Start backend and frontend in the background                                       |
-| `make restart`      | Stop and start the local services                                                  |
-| `make stop`         | Stop local services                                                                |
-| `make build`        | Build the backend binary and frontend assets                                       |
-| `make test`         | Run Go unit tests                                                                  |
-| `make lint`         | Lint Go code (`golangci-lint`)                                                   |
-| `make fmt`          | Format Go code                                                                     |
+| Command               | Description                                                                         |
+| --------------------- | ----------------------------------------------------------------------------------- |
+| `make deps`         | Install backend and frontend dependencies                                           |
+| `make dev`          | Start backend and frontend in the foreground                                        |
+| `make start`        | Start backend and frontend in the background                                        |
+| `make restart`      | Stop and start the local services                                                   |
+| `make stop`         | Stop local services                                                                 |
+| `make build`        | Build the backend binary and frontend assets                                        |
+| `make test`         | Run Go unit tests                                                                   |
+| `make lint`         | Lint Go code (`golangci-lint`)                                                    |
+| `make fmt`          | Format Go code                                                                      |
 | `make seed`         | Seed data (tenants, users, ollama provider, virtual keys) and generate demo traffic |
-| `make traffic-demo` | Generate demo traffic                                                              |
-| `make load-test`    | Run load-test scenarios (also `-json`, `-stream`, `-soak`, capacity targets) |
+| `make traffic-demo` | Generate demo traffic                                                               |
+| `make load-test`    | Run load-test scenarios (also `-json`, `-stream`, `-soak`, capacity targets)  |
 
 ## Project Structure
 
