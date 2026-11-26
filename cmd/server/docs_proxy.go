@@ -142,17 +142,29 @@ func (p *ProxyHandlers) HandleAudioTranslation(c *gin.Context) {}
 // @Router /v1/proxy/{path} [post]
 func (p *ProxyHandlers) ProxyRequest(c *gin.Context) {}
 
-// HandleStreamRequest 流式聊天补全
-// @Summary Stream chat completion
-// @Description Create a streaming chat completion (SSE)
+// HandleMessages Anthropic Messages 端点
+// @Summary Anthropic Messages
+// @Description Anthropic Messages API (translated to the canonical chat protocol)
 // @Tags proxy
 // @Accept json
 // @Produce json
-// @Param request body object true "Chat completion request"
-// @Success 200 {object} object "Streaming response"
+// @Param request body object true "Anthropic messages request"
+// @Success 200 {object} object "Anthropic messages response"
 // @Failure 400 {object} map[string]interface{} "Invalid request"
 // @Failure 401 {object} map[string]interface{} "Unauthorized"
 // @Failure 500 {object} map[string]interface{} "Internal error"
 // @Security VirtualKeyAuth
-// @Router /v1/chat/completions/stream [post]
-func (p *ProxyHandlers) HandleStreamRequest(c *gin.Context) {}
+// @Router /v1/messages [post]
+func (p *ProxyHandlers) HandleMessages(c *gin.Context) {}
+
+// HandleAnthropicCountTokens token 计数（本地估算）
+// @Summary Count tokens
+// @Description Anthropic-compatible token count estimate
+// @Tags proxy
+// @Accept json
+// @Produce json
+// @Param request body object true "Anthropic messages request"
+// @Success 200 {object} object "Token count"
+// @Security VirtualKeyAuth
+// @Router /v1/messages/count_tokens [post]
+func (p *ProxyHandlers) HandleAnthropicCountTokens(c *gin.Context) {}

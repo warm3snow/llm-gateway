@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/warm3snow/llm-gateway/internal/config"
+	"github.com/warm3snow/llm-gateway/internal/database"
 	"github.com/warm3snow/llm-gateway/internal/models"
 	"github.com/warm3snow/llm-gateway/internal/types"
 )
@@ -82,10 +83,49 @@ func JWTAuth(cfg *config.Config) gin.HandlerFunc {
 			if ok := setUintClaim(c, claims, "user_id"); !ok {
 				return
 			}
+			refreshRoleFromDB(c)
 		}
 
 		c.Next()
 	}
+}
+
+// refreshRoleFromDB resolves the caller's current role from the database so
+// that role changes (and membership removal) take effect immediately instead
+// of waiting for the JWT to expire. Claim values stand in when the lookup is
+// unavailable (no database, unknown user).
+func refreshRoleFromDB(c *gin.Context) {
+	db := database.GetDB()
+	if db == nil {
+		return
+	}
+	userID, exists := c.Get("user_id")
+	if !exists {
+		return
+	}
+	uid, ok := userID.(uint)
+	if !ok {
+		return
+	}
+
+	var user models.User
+	if err := db.Select("id", "role").Where("id = ?", uid).First(&user).Error; err != nil {
+		return
+	}
+	role := user.Role
+	if role != models.RoleSuperAdmin {
+		if tenantID, ok := c.Get("tenant_id"); ok {
+			if tid, ok := tenantID.(uint); ok {
+				var member models.TenantMember
+				if err := db.Select("id", "role").
+					Where("user_id = ? AND tenant_id = ?", uid, tid).
+					First(&member).Error; err == nil && member.Role != "" {
+					role = member.Role
+				}
+			}
+		}
+	}
+	c.Set("role", role)
 }
 
 func setUintClaim(c *gin.Context, claims jwt.MapClaims, name string) bool {

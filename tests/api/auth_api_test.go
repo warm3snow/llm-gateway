@@ -20,7 +20,7 @@ func TestAuthAPILoginSingleTenantReturnsFinalToken(t *testing.T) {
 	router := newAPIRouter(t, cfg)
 
 	w := testutil.DoJSON(t, router, http.MethodPost, "/api/v1/auth/login", gin.H{
-		"username": "tenant-admin",
+		"username": user.Email,
 		"password": "secret",
 	})
 
@@ -51,7 +51,7 @@ func TestAuthAPILoginMultipleTenantsRequiresSelection(t *testing.T) {
 	router := newAPIRouter(t, cfg)
 
 	w := testutil.DoJSON(t, router, http.MethodPost, "/api/v1/auth/login", gin.H{
-		"username": "multi-user",
+		"username": user.Email,
 		"password": "secret",
 	})
 
@@ -99,7 +99,7 @@ func TestAuthAPIRejectsInvalidPassword(t *testing.T) {
 	router := newAPIRouter(t, cfg)
 
 	w := testutil.DoJSON(t, router, http.MethodPost, "/api/v1/auth/login", gin.H{
-		"username": "tenant-admin",
+		"username": user.Email,
 		"password": "wrong",
 	})
 

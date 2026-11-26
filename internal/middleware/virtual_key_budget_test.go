@@ -51,7 +51,7 @@ func TestVirtualKeyAuthIncludesPendingBudget(t *testing.T) {
 	req.Header.Set("x-llm-gateway-api-key", plainKey)
 	router.ServeHTTP(w, req)
 
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusForbidden, w.Body.String())
+	if w.Code != http.StatusPaymentRequired {
+		t.Fatalf("status = %d, want %d; body=%s", w.Code, http.StatusPaymentRequired, w.Body.String())
 	}
 }

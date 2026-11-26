@@ -27,8 +27,7 @@ import {
   YAxis,
   CartesianGrid,
 } from "recharts";
-import { useState } from "react";
-import { currentRole } from "@/lib/api";
+import { useRole } from "@/lib/use-session";
 import { roleScopeLabel } from "@/components/auth/RoleGate";
 
 function fmtInt(n?: number) {
@@ -45,7 +44,7 @@ function fmtPct(n?: number) {
 }
 
 export default function DashboardPage() {
-  const [role] = useState<string | null>(() => currentRole());
+  const role = useRole();
 
   const statsQ = useStats();
   const providersQ = useProviders();
@@ -65,7 +64,7 @@ export default function DashboardPage() {
   return (
     <div className="scan-in">
       <PageHeader
-        code="01 / overview"
+        code="01 / observe"
         title="Control Plane"
         description={`Real-time signal from the gateway · ${roleScopeLabel(role)}`}
         actions={
@@ -90,65 +89,37 @@ export default function DashboardPage() {
               label="requests"
               code="total"
               value={fmtInt(stats.totalRequests)}
-              delta="+12.4%"
-              deltaDirection="up"
               tone="primary"
             >
               <div className="font-mono text-[10px] text-muted-foreground/60">
                 lifetime
               </div>
             </StatTile>
-            <StatTile
-              label="tokens"
-              code="in+out"
-              value={fmtInt(stats.totalTokens)}
-              tone="accent"
-            >
+            <StatTile label="tokens" code="in+out" value={fmtInt(stats.totalTokens)} tone="accent">
               <div className="font-mono text-[10px] text-muted-foreground/60">
                 processed
               </div>
             </StatTile>
-            <StatTile
-              label="cost"
-              code="usd"
-              value={fmtCost(stats.totalCost)}
-              unit="$"
-            >
+            <StatTile label="cost" code="usd" value={fmtCost(stats.totalCost)} unit="$">
               <div className="font-mono text-[10px] text-muted-foreground/60">
                 cumulative
               </div>
             </StatTile>
-            <StatTile
-              label="providers"
-              code="active"
-              value={fmtInt(stats.activeProviders)}
-            >
+            <StatTile label="success" code="rate" value={fmtPct(stats.successRate)} unit="%" tone="accent">
+              <div className="font-mono text-[10px] text-muted-foreground/60">
+                24h window
+              </div>
+            </StatTile>
+            <StatTile label="providers" code="active" value={fmtInt(stats.activeProviders)}>
               <div className="flex gap-1">
                 {activeProviders.slice(0, 5).map((p) => (
                   <Led key={p.name} tone="success" pulse />
                 ))}
               </div>
             </StatTile>
-            <StatTile
-              label="vkeys"
-              code="active"
-              value={fmtInt(stats.activeVirtualKeys)}
-            >
+            <StatTile label="keys" code="active" value={fmtInt(stats.activeVirtualKeys)}>
               <div className="font-mono text-[10px] text-muted-foreground/60">
                 configured
-              </div>
-            </StatTile>
-            <StatTile
-              label="success"
-              code="rate"
-              value={fmtPct(stats.successRate)}
-              unit="%"
-              deltaDirection="up"
-              delta="ok"
-              tone="accent"
-            >
-              <div className="font-mono text-[10px] text-muted-foreground/60">
-                24h window
               </div>
             </StatTile>
           </>
@@ -233,7 +204,7 @@ export default function DashboardPage() {
           </PanelBody>
         </Panel>
 
-        {/* Provider status rail */}
+        {/* Provider health summary — full management lives on the Models page */}
         <Panel>
           <PanelHeader>
             <div className="flex items-center gap-2">
@@ -244,7 +215,7 @@ export default function DashboardPage() {
               href="/providers"
               className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground transition-colors hover:text-primary"
             >
-              all →
+              manage →
             </Link>
           </PanelHeader>
           <PanelBody className="space-y-2 p-3">
@@ -259,35 +230,26 @@ export default function DashboardPage() {
                 icon={<Server className="h-5 w-5" />}
               />
             ) : (
-              providers.slice(0, 6).map((p) => (
-                <div
-                  key={p.name}
-                  className="flex items-center gap-3 rounded-sm border border-border bg-background/30 px-3 py-2"
-                >
-                  <Led
-                    tone={p.enabled ? "success" : "muted"}
-                    pulse={p.enabled}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="truncate font-mono text-[12px] text-foreground">
-                        {p.name}
-                      </span>
-                      <span className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground/50">
-                        {p.provider}
-                      </span>
-                    </div>
-                    <div className="font-mono text-[10px] text-muted-foreground/60">
-                      w:{p.weight} · {p.requestTimeout}ms
-                    </div>
-                  </div>
-                  {p.enabled ? (
-                    <Badge variant="success">up</Badge>
-                  ) : (
-                    <Badge variant="outline">down</Badge>
-                  )}
+              <div className="space-y-2">
+                <div className="flex items-baseline justify-between font-mono text-[11px]">
+                  <span className="text-muted-foreground">enabled</span>
+                  <span className="num text-foreground">
+                    {activeProviders.length} / {providers.length}
+                  </span>
                 </div>
-              ))
+                <div className="flex flex-wrap gap-1.5">
+                  {providers.slice(0, 8).map((p) => (
+                    <Badge key={p.name} variant={p.enabled ? "success" : "outline"}>
+                      {p.name}
+                    </Badge>
+                  ))}
+                </div>
+                {providers.length > 8 && (
+                  <div className="font-mono text-[10px] text-muted-foreground/60">
+                    +{providers.length - 8} more
+                  </div>
+                )}
+              </div>
             )}
           </PanelBody>
         </Panel>

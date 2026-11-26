@@ -3,7 +3,6 @@ package config
 import (
 	"fmt"
 	"os"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -11,31 +10,6 @@ import (
 	"github.com/spf13/viper"
 	"github.com/warm3snow/llm-gateway/internal/types"
 )
-
-var envVarRegex = regexp.MustCompile(`\$\{([^}]+)\}`)
-
-// expandEnvInString replaces ${VAR} placeholders with environment variable values.
-func expandEnvInString(s string) string {
-	return envVarRegex.ReplaceAllStringFunc(s, func(match string) string {
-		name := match[2 : len(match)-1] // strip ${ and }
-		if val, ok := os.LookupEnv(name); ok {
-			return val
-		}
-		return match // leave unchanged if env var not set
-	})
-}
-
-// expandEnvInMap recursively expands ${VAR} placeholders in map values.
-func expandEnvInMap(m map[string]interface{}) {
-	for k, v := range m {
-		switch val := v.(type) {
-		case string:
-			m[k] = expandEnvInString(val)
-		case map[string]interface{}:
-			expandEnvInMap(val)
-		}
-	}
-}
 
 // Config 全局配置
 type Config struct {
@@ -70,20 +44,28 @@ type ServerConfig struct {
 }
 
 // GatewayConfig 网关配置
+//
+// Providers is the runtime cache of provider configs loaded from the
+// database (the single source of truth — see ProviderConfigService). It is
+// populated at startup and updated in place by the admin handlers; it is
+// never read from or written to config.yaml.
 type GatewayConfig struct {
-	ProvidersMu        sync.RWMutex             `mapstructure:"-" json:"-" yaml:"-"`
-	DefaultProvider    string                   `mapstructure:"defaultProvider" json:"defaultProvider" yaml:"defaultProvider"`
-	Providers          map[string]types.Options `mapstructure:"providers" json:"providers" yaml:"providers"`
-	DefaultConfig      *types.Config            `mapstructure:"defaultConfig" json:"defaultConfig" yaml:"defaultConfig"`
-	GuardrailsEnabled  bool                     `mapstructure:"guardrailsEnabled" json:"guardrailsEnabled" yaml:"guardrailsEnabled"`
-	MaxRequestTimeout  int                      `mapstructure:"maxRequestTimeout" json:"maxRequestTimeout" yaml:"maxRequestTimeout"`
-	SupportedProviders []string                 `mapstructure:"supportedProviders" json:"supportedProviders" yaml:"supportedProviders"`
-	AutoMode           AutoModeConfig           `mapstructure:"autoMode" json:"autoMode" yaml:"autoMode"`
+	ProvidersMu       sync.RWMutex             `mapstructure:"-" json:"-" yaml:"-"`
+	DefaultProvider   string                   `mapstructure:"defaultProvider" json:"defaultProvider" yaml:"defaultProvider"`
+	Providers         map[string]types.Options `mapstructure:"-" json:"-" yaml:"-"`
+	DefaultConfig     *types.Config            `mapstructure:"defaultConfig" json:"defaultConfig" yaml:"defaultConfig"`
+	GuardrailsEnabled bool                     `mapstructure:"guardrailsEnabled" json:"guardrailsEnabled" yaml:"guardrailsEnabled"`
+	MaxRequestTimeout int                      `mapstructure:"maxRequestTimeout" json:"maxRequestTimeout" yaml:"maxRequestTimeout"`
+	// AutoMode tunes the auto-model selector's scoring. It is optional: zero
+	// fields fall back to the built-in defaults, so it does not appear in
+	// config.yaml by default.
+	AutoMode AutoModeConfig `mapstructure:"autoMode" json:"autoMode" yaml:"autoMode"`
+	Redact   RedactConfig   `mapstructure:"redact" json:"redact" yaml:"redact"`
 }
 
-// AutoModeConfig controls dynamic provider/model selection for chat requests.
+// AutoModeConfig overrides the auto-mode scoring weights. Only set the values
+// you want to change; zero means "use the built-in default".
 type AutoModeConfig struct {
-	Enabled                     bool    `mapstructure:"enabled" json:"enabled" yaml:"enabled"`
 	CostWeight                  float64 `mapstructure:"costWeight" json:"costWeight" yaml:"costWeight"`
 	ConcurrencyWeight           float64 `mapstructure:"concurrencyWeight" json:"concurrencyWeight" yaml:"concurrencyWeight"`
 	RecentUsageWeight           float64 `mapstructure:"recentUsageWeight" json:"recentUsageWeight" yaml:"recentUsageWeight"`
@@ -92,6 +74,31 @@ type AutoModeConfig struct {
 	RecentWindowSeconds         int     `mapstructure:"recentWindowSeconds" json:"recentWindowSeconds" yaml:"recentWindowSeconds"`
 	DefaultMaxConcurrency       int     `mapstructure:"defaultMaxConcurrency" json:"defaultMaxConcurrency" yaml:"defaultMaxConcurrency"`
 	DefaultOutputTokens         int     `mapstructure:"defaultOutputTokens" json:"defaultOutputTokens" yaml:"defaultOutputTokens"`
+}
+
+// RedactConfig controls sensitive-information masking on /v1/* proxy
+// requests: secrets and personal data found in a request go to the provider
+// as stable placeholders and are put back in the response.
+type RedactConfig struct {
+	Enabled      bool              `mapstructure:"enabled" json:"enabled" yaml:"enabled"`
+	Secrets      bool              `mapstructure:"secrets" json:"secrets" yaml:"secrets"`
+	Personal     bool              `mapstructure:"personal" json:"personal" yaml:"personal"`
+	Words        []string          `mapstructure:"words" json:"words" yaml:"words"`
+	WordsAnyCase bool              `mapstructure:"wordsAnyCase" json:"wordsAnyCase" yaml:"wordsAnyCase"`
+	WordsWhole   bool              `mapstructure:"wordsWhole" json:"wordsWhole" yaml:"wordsWhole"`
+	Rules        []RedactRule      `mapstructure:"rules" json:"rules" yaml:"rules"`
+	Kinds        map[string]bool   `mapstructure:"kinds" json:"kinds" yaml:"kinds"`
+	Actions      map[string]string `mapstructure:"actions" json:"actions" yaml:"actions"`
+	Allow        []string          `mapstructure:"allow" json:"allow" yaml:"allow"`
+}
+
+// RedactRule is one user-defined masking rule: a literal prefix its values
+// start with, or a regex (value = capture group 1 when present, else the
+// whole match). Prefix and Regex are mutually exclusive.
+type RedactRule struct {
+	Kind   string `mapstructure:"kind" json:"kind" yaml:"kind"`
+	Prefix string `mapstructure:"prefix" json:"prefix" yaml:"prefix"`
+	Regex  string `mapstructure:"regex" json:"regex" yaml:"regex"`
 }
 
 // CacheConfig 缓存配置
@@ -127,13 +134,11 @@ type LoggingConfig struct {
 
 // SecurityConfig 安全配置
 type SecurityConfig struct {
-	APIKeyHeader     string   `mapstructure:"apiKeyHeader" json:"apiKeyHeader" yaml:"apiKeyHeader"`
-	AllowedOrigins   []string `mapstructure:"allowedOrigins" json:"allowedOrigins" yaml:"allowedOrigins"`
-	RateLimitEnabled bool     `mapstructure:"rateLimitEnabled" json:"rateLimitEnabled" yaml:"rateLimitEnabled"`
-	RateLimit        int      `mapstructure:"rateLimit" json:"rateLimit" yaml:"rateLimit"`
-	AdminUser        string   `mapstructure:"adminUser" json:"adminUser" yaml:"adminUser"`
-	AdminPass        string   `mapstructure:"adminPass" json:"adminPass" yaml:"adminPass"`
-	JWTSecret        string   `mapstructure:"jwtSecret" json:"jwtSecret" yaml:"jwtSecret"`
+	APIKeyHeader   string   `mapstructure:"apiKeyHeader" json:"apiKeyHeader" yaml:"apiKeyHeader"`
+	AllowedOrigins []string `mapstructure:"allowedOrigins" json:"allowedOrigins" yaml:"allowedOrigins"`
+	AdminUser      string   `mapstructure:"adminUser" json:"adminUser" yaml:"adminUser"`
+	AdminPass      string   `mapstructure:"adminPass" json:"adminPass" yaml:"adminPass"`
+	JWTSecret      string   `mapstructure:"jwtSecret" json:"jwtSecret" yaml:"jwtSecret"`
 	// EncryptionKey is a 64-char hex string (32 bytes) used to encrypt sensitive
 	// data (e.g. provider API keys) at rest. If empty, a deterministic key is
 	// derived from JWTSecret at startup. Set this explicitly in production so
@@ -184,17 +189,6 @@ func LoadConfig(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
 
-	// Expand ${ENV_VAR} placeholders in provider API keys and other string fields
-	for name, opts := range cfg.Gateway.Providers {
-		if opts.APIKey != "" {
-			opts.APIKey = expandEnvInString(opts.APIKey)
-		}
-		if opts.CustomHost != "" {
-			opts.CustomHost = expandEnvInString(opts.CustomHost)
-		}
-		cfg.Gateway.Providers[name] = opts
-	}
-
 	// 验证配置
 	if err := validateConfig(&cfg); err != nil {
 		return nil, err
@@ -216,19 +210,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("gateway.defaultProvider", "openai")
 	v.SetDefault("gateway.guardrailsEnabled", true)
 	v.SetDefault("gateway.maxRequestTimeout", 120000)
-	v.SetDefault("gateway.autoMode.enabled", true)
-	v.SetDefault("gateway.autoMode.costWeight", 0.50)
-	v.SetDefault("gateway.autoMode.concurrencyWeight", 0.25)
-	v.SetDefault("gateway.autoMode.recentUsageWeight", 0.15)
-	v.SetDefault("gateway.autoMode.errorWeight", 0.05)
-	v.SetDefault("gateway.autoMode.providerWeightPenaltyWeight", 0.05)
-	v.SetDefault("gateway.autoMode.recentWindowSeconds", 300)
-	v.SetDefault("gateway.autoMode.defaultMaxConcurrency", 20)
-	v.SetDefault("gateway.autoMode.defaultOutputTokens", 1024)
-	v.SetDefault("gateway.supportedProviders", []string{
-		"openai", "anthropic", "google", "azure-openai", "cohere",
-		"mistral-ai", "together-ai", "ollama", "groq", "deepseek",
-	})
+	v.SetDefault("gateway.redact.enabled", false)
+	v.SetDefault("gateway.redact.secrets", true)
 
 	v.SetDefault("cache.enabled", false)
 	v.SetDefault("cache.type", "memory")
@@ -249,8 +232,6 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("security.apiKeyHeader", "x-llm-gateway-api-key")
 	v.SetDefault("security.allowedOrigins", []string{"*"})
-	v.SetDefault("security.rateLimitEnabled", false)
-	v.SetDefault("security.rateLimit", 100)
 	v.SetDefault("security.adminUser", "admin")
 	v.SetDefault("security.adminPass", "admin123")
 	v.SetDefault("security.jwtSecret", "llm-gateway-secret-change-in-production")
@@ -304,7 +285,16 @@ func SaveConfig(cfg *Config, path string) error {
 	v := viper.New()
 
 	v.Set("server", cfg.Server)
-	v.Set("gateway", cfg.Gateway)
+	// gateway carries a sync.RWMutex (held while requests read the providers
+	// map); serialize providers without it.
+	v.Set("gateway", map[string]interface{}{
+		"defaultProvider":   cfg.Gateway.DefaultProvider,
+		"defaultConfig":     cfg.Gateway.DefaultConfig,
+		"guardrailsEnabled": cfg.Gateway.GuardrailsEnabled,
+		"maxRequestTimeout": cfg.Gateway.MaxRequestTimeout,
+		"autoMode":          cfg.Gateway.AutoMode,
+		"redact":            cfg.Gateway.Redact,
+	})
 	v.Set("cache", cfg.Cache)
 	v.Set("budget", cfg.Budget)
 	v.Set("database", cfg.Database)
@@ -325,4 +315,11 @@ func GetConfigPath() string {
 		return path
 	}
 	return "configs/config.yaml"
+}
+
+// SetConfigPath overrides the config file path (used by the --config flag).
+func SetConfigPath(path string) {
+	if path != "" {
+		os.Setenv("LLM_GATEWAY_CONFIG_PATH", path)
+	}
 }

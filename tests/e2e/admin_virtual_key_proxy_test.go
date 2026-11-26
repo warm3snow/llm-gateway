@@ -74,7 +74,7 @@ func TestAdminCreatesVirtualKeyAndProxiesChatCompletion(t *testing.T) {
 	router := newGatewayRouter(t, cfg)
 
 	login := testutil.DoJSON(t, router, http.MethodPost, "/api/v1/auth/login", gin.H{
-		"username": cfg.Security.AdminUser,
+		"username": testutil.AdminEmail(cfg.Security.AdminUser),
 		"password": cfg.Security.AdminPass,
 	})
 	require.Equal(t, http.StatusOK, login.Code, login.Body.String())

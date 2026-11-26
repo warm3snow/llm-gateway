@@ -26,7 +26,6 @@ func SetupSQLiteDB(t *testing.T) *gorm.DB {
 		&models.AlertRule{},
 		&models.AlertEvent{},
 		&models.ProviderConfig{},
-		&models.CacheEntry{},
 		&models.ModelPricing{},
 	); err != nil {
 		t.Fatalf("migrate sqlite: %v", err)

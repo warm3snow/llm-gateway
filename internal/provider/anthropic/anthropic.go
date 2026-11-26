@@ -1,12 +1,14 @@
 package anthropic
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/warm3snow/llm-gateway/internal/provider"
@@ -99,6 +101,12 @@ func (p *AnthropicProvider) ChatCompletion(ctx context.Context, req *types.ChatC
 		return nil, fmt.Errorf("failed to send request: %w", err)
 	}
 
+	// 流式请求把 Anthropic messages SSE 翻译成 OpenAI chat chunk SSE；
+	// 非流式按整体响应转换。
+	if req.Stream && resp.StatusCode == http.StatusOK && isSSE(resp) {
+		return streamAnthropicToOpenAI(resp, req.Model), nil
+	}
+
 	// 转换响应格式（从 Anthropic 到 OpenAI）
 	convertedResp, err := convertResponseToOpenAI(resp)
 	if err != nil {
@@ -107,6 +115,146 @@ func (p *AnthropicProvider) ChatCompletion(ctx context.Context, req *types.ChatC
 	}
 
 	return convertedResp, nil
+}
+
+// isSSE reports whether the response carries an SSE stream.
+func isSSE(resp *http.Response) bool {
+	return strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream")
+}
+
+// Stream converts an Anthropic messages SSE response into an OpenAI
+// chat-chunk SSE response. Exported for reuse and tests.
+func Stream(resp *http.Response, model string) *http.Response {
+	return streamAnthropicToOpenAI(resp, model)
+}
+
+// streamAnthropicToOpenAI wraps an Anthropic messages SSE stream and emits
+// OpenAI chat.completion.chunk events with the same text deltas, finishing
+// with a usage-carrying final chunk (as stream_options.include_usage would).
+func streamAnthropicToOpenAI(resp *http.Response, model string) *http.Response {
+	pr, pw := io.Pipe()
+	go func() {
+		defer pw.Close()
+		err := translateAnthropicStream(resp.Body, pw, model)
+		if err != nil && err != io.EOF && err != context.Canceled {
+			// A broken client pipe is expected; surface others by closing
+			// the pipe with the error so the reader sees it.
+			_ = pw.CloseWithError(err)
+		}
+	}()
+	out := &http.Response{
+		Status:     resp.Status,
+		StatusCode: resp.StatusCode,
+		Header:     resp.Header.Clone(),
+		Body:       pr,
+	}
+	out.Header.Set("Content-Type", "text/event-stream")
+	return out
+}
+
+// translateAnthropicStream reads Anthropic messages SSE events and writes
+// OpenAI-format SSE data lines to w.
+func translateAnthropicStream(r io.Reader, w io.Writer, model string) error {
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	writeChunk := func(payload map[string]interface{}) error {
+		data, err := json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintf(w, "data: %s\n\n", data)
+		return err
+	}
+
+	// inputTokens is remembered from message_start for the final usage chunk.
+	inputTokens, cacheRead, cacheWrite := 0, 0, 0
+	sawContent := false
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if payload == "" {
+			continue
+		}
+		var event struct {
+			Type  string `json:"type"`
+			Delta *struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			} `json:"delta"`
+			Message *struct {
+				ID    string `json:"id"`
+				Usage *struct {
+					InputTokens              int `json:"input_tokens"`
+					CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+					CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+				} `json:"usage"`
+			} `json:"message"`
+			Usage *struct {
+				OutputTokens             int `json:"output_tokens"`
+				CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+				CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+			} `json:"usage"`
+		}
+		if err := json.Unmarshal([]byte(payload), &event); err != nil {
+			continue
+		}
+		switch event.Type {
+		case "message_start":
+			if event.Message != nil && event.Message.Usage != nil {
+				inputTokens = event.Message.Usage.InputTokens
+				cacheRead = event.Message.Usage.CacheReadInputTokens
+				cacheWrite = event.Message.Usage.CacheCreationInputTokens
+			}
+		case "content_block_delta":
+			if event.Delta != nil && event.Delta.Type == "text_delta" && event.Delta.Text != "" {
+				sawContent = true
+				if err := writeChunk(map[string]interface{}{
+					"id": "chatcmpl-anthropic", "object": "chat.completion.chunk", "model": model,
+					"choices": []map[string]interface{}{
+						{"index": 0, "delta": map[string]interface{}{"content": event.Delta.Text}},
+					},
+				}); err != nil {
+					return err
+				}
+			}
+		case "message_delta":
+			if event.Usage != nil {
+				finish := "stop"
+				if err := writeChunk(map[string]interface{}{
+					"id": "chatcmpl-anthropic", "object": "chat.completion.chunk", "model": model,
+					"choices": []map[string]interface{}{
+						{"index": 0, "delta": map[string]interface{}{}, "finish_reason": finish},
+					},
+					"usage": map[string]interface{}{
+						"prompt_tokens":     inputTokens,
+						"completion_tokens": event.Usage.OutputTokens,
+						"total_tokens":      inputTokens + event.Usage.OutputTokens,
+						"cache_read":        cacheRead,
+						"cache_write":       cacheWrite,
+					},
+				}); err != nil {
+					return err
+				}
+			}
+		case "message_stop":
+			_, err := fmt.Fprint(w, "data: [DONE]\n\n")
+			return err
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	if !sawContent {
+		// No content events arrived; still terminate the stream cleanly.
+		_, err := fmt.Fprint(w, "data: [DONE]\n\n")
+		return err
+	}
+	return nil
 }
 
 // Completion 文本补全
@@ -311,18 +459,29 @@ func convertAnthropicToOpenAIFormat(anthropicResp map[string]interface{}) map[st
 
 	// 使用信息
 	if usage, ok := anthropicResp["usage"].(map[string]interface{}); ok {
-		// 将 float64 转换为 int (JSON 数字默认是 float64)
-		inputTokens := int(usage["input_tokens"].(float64))
-		outputTokens := int(usage["output_tokens"].(float64))
+		inputTokens := jsonInt(usage["input_tokens"])
+		outputTokens := jsonInt(usage["output_tokens"])
+		cacheRead := jsonInt(usage["cache_read_input_tokens"])
+		cacheWrite := jsonInt(usage["cache_creation_input_tokens"])
 
 		openaiResp["usage"] = map[string]interface{}{
 			"prompt_tokens":     inputTokens,
 			"completion_tokens": outputTokens,
 			"total_tokens":      inputTokens + outputTokens,
+			"cache_read":        cacheRead,
+			"cache_write":       cacheWrite,
 		}
 	}
 
 	return openaiResp
+}
+
+// jsonInt converts a decoded JSON number (float64) to int; nil/other → 0.
+func jsonInt(v interface{}) int {
+	if f, ok := v.(float64); ok {
+		return int(f)
+	}
+	return 0
 }
 
 // 注册 Anthropic provider

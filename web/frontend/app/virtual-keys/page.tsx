@@ -4,11 +4,12 @@ import { useState } from "react";
 import {
   useVirtualKeys,
   useProviders,
+  useUsers,
   useCreateVirtualKey,
   useUpdateVirtualKey,
   useDeleteVirtualKey,
 } from "@/lib/queries";
-import { currentRole } from "@/lib/api";
+import { useRole } from "@/lib/use-session";
 import type { VirtualKey } from "@/lib/types";
 import { PageHeader } from "@/components/ui/page-header";
 import { Panel, PanelHeader, PanelBody } from "@/components/ui/panel";
@@ -28,8 +29,10 @@ import {
   SheetTrigger,
   SheetFooter,
 } from "@/components/ui/sheet";
+import { useViewMode } from "@/lib/use-view-mode";
+import { ViewToggle } from "@/components/ui/view-toggle";
 import { toast } from "sonner";
-import { KeyRound, Plus, Trash2, Copy, Wallet, Pencil, Gauge, Server } from "lucide-react";
+import { KeyRound, Plus, Trash2, Copy, Wallet, Pencil, Gauge, Server, User } from "lucide-react";
 
 function fmtUsd(n?: number) {
   if (n == null) return "0.0000";
@@ -38,6 +41,145 @@ function fmtUsd(n?: number) {
 function pct(used?: number, total?: number) {
   if (!total || total === 0) return 0;
   return Math.min(100, ((used ?? 0) / total) * 100);
+}
+
+function keyOwnerLabel(k: VirtualKey) {
+  if (k.user_username) return k.user_username;
+  if (k.created_by_username) return k.created_by_username;
+  if (k.user_id) return `user #${k.user_id}`;
+  return "—";
+}
+
+function boundProvidersLabel(k: VirtualKey) {
+  const bound = parseProviders(k.providers);
+  return bound.length === 0 ? "all" : bound.join(", ");
+}
+
+function KeyStatusBadge({ keyRef }: { keyRef: VirtualKey }) {
+  if (keyRef.status !== "active") return <Badge variant="outline">revoked</Badge>;
+  const overBudget = pct(keyRef.budget_used, keyRef.budget_total) >= 100;
+  return overBudget ? (
+    <Badge variant="warning">over budget</Badge>
+  ) : (
+    <Badge variant="success">active</Badge>
+  );
+}
+
+// A zero budget_total means unlimited, not a zero-dollar cap.
+function budgetTotalLabel(k: VirtualKey) {
+  return k.budget_total > 0 ? ` / $${fmtUsd(k.budget_total)}` : " / ∞";
+}
+
+function KeyBudgetCell({ keyRef, compact }: { keyRef: VirtualKey; compact?: boolean }) {
+  const usage = pct(keyRef.budget_used, keyRef.budget_total);
+  const overBudget = usage >= 100;
+  if (compact) {
+    // Single-line variant so every cell in a list row shares the same
+    // height and stays vertically centred.
+    return (
+      <div className="min-w-0 space-y-1">
+        <div className="flex items-baseline justify-between gap-2 font-mono text-[11px]">
+          <span className="num truncate">
+            <span className="text-foreground">${fmtUsd(keyRef.budget_used)}</span>
+            <span className="text-muted-foreground">{budgetTotalLabel(keyRef)}</span>
+          </span>
+          {keyRef.budget_total > 0 && (
+            <span className="shrink-0 font-mono text-[10px] text-muted-foreground/60">
+              {usage.toFixed(0)}%
+            </span>
+          )}
+        </div>
+        <div className="relative h-1 overflow-hidden rounded-sm bg-secondary">
+          <div
+            className={`absolute inset-y-0 left-0 ${
+              overBudget ? "bg-warning" : "bg-primary"
+            }`}
+            style={{ width: `${usage}%` }}
+          />
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-baseline justify-between font-mono text-[11px]">
+        <span className="flex items-center gap-1.5 text-muted-foreground">
+          <Wallet className="h-3 w-3" /> budget
+        </span>
+        <span className="num">
+          <span className="text-foreground">${fmtUsd(keyRef.budget_used)}</span>
+          <span className="text-muted-foreground">{budgetTotalLabel(keyRef)}</span>
+        </span>
+      </div>
+      <div className="relative h-1.5 overflow-hidden rounded-sm bg-secondary">
+        <div
+          className={`absolute inset-y-0 left-0 ${
+            overBudget ? "bg-warning glow-amber" : "bg-primary box-glow-amber"
+          }`}
+          style={{ width: `${usage}%` }}
+        />
+      </div>
+      <div className="flex justify-end font-mono text-[10px] text-muted-foreground/60">
+        {usage.toFixed(1)}% used
+      </div>
+    </div>
+  );
+}
+
+function KeyActions({
+  keyRef,
+  canManageKey,
+  deletePending,
+  onEdit,
+  onDelete,
+}: {
+  keyRef: VirtualKey;
+  canManageKey: boolean;
+  deletePending: boolean;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <>
+      {canManageKey && (
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="text-muted-foreground hover:text-primary"
+          onClick={onEdit}
+          aria-label={`Edit key ${keyRef.name}`}
+        >
+          <Pencil className="h-3.5 w-3.5" />
+        </Button>
+      )}
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        className="text-muted-foreground hover:text-primary"
+        onClick={() => {
+          navigator.clipboard
+            ?.writeText(keyRef.key_hash_prefix || "")
+            .then(() => toast.success("key prefix copied"))
+            .catch(() => toast.error("clipboard unavailable"));
+        }}
+        aria-label={`Copy prefix for ${keyRef.name}`}
+      >
+        <Copy className="h-3.5 w-3.5" />
+      </Button>
+      {canManageKey && (
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="text-muted-foreground hover:text-destructive hover:border-destructive/40"
+          onClick={onDelete}
+          disabled={deletePending}
+          aria-label={`Revoke key ${keyRef.name}`}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </Button>
+      )}
+    </>
+  );
 }
 
 function parseProviders(value?: string) {
@@ -50,6 +192,7 @@ const defaultRateLimit = "60";
 export default function VirtualKeysPage() {
   const { data: keys, isLoading } = useVirtualKeys();
   const { data: providers } = useProviders();
+  const { data: members } = useUsers();
   const createMut = useCreateVirtualKey();
   const updateMut = useUpdateVirtualKey();
   const deleteMut = useDeleteVirtualKey();
@@ -57,22 +200,29 @@ export default function VirtualKeysPage() {
   const [name, setName] = useState("");
   const [budget, setBudget] = useState("");
   const [rateLimit, setRateLimit] = useState(defaultRateLimit);
+  const [ownerId, setOwnerId] = useState("");
   const [editOpen, setEditOpen] = useState(false);
   const [editing, setEditing] = useState<VirtualKey | null>(null);
   const [editName, setEditName] = useState("");
   const [editBudget, setEditBudget] = useState("");
   const [editRateLimit, setEditRateLimit] = useState("0");
+  const [editOwner, setEditOwner] = useState("");
   const [editProviderNames, setEditProviderNames] = useState<string[]>([]);
-  const [role] = useState<string | null>(() => currentRole());
+  const role = useRole();
+  const [viewMode, setViewMode] = useViewMode("virtual-keys");
 
   const canCreateKey = role !== null;
   const canManageKey = role !== null && role !== "tenant_user";
   const canSetBudget = role !== null && role !== "tenant_user";
+  const memberOptions = (members ?? []).filter(
+    (m) => m.role !== "super_admin"
+  );
 
   function resetForm() {
     setName("");
     setBudget("");
     setRateLimit(defaultRateLimit);
+    setOwnerId("");
   }
 
   async function handleCreate(e: React.FormEvent) {
@@ -81,7 +231,12 @@ export default function VirtualKeysPage() {
     try {
       await createMut.mutateAsync({
         name: name.trim(),
-        ...(canSetBudget ? { budget_total: parseFloat(budget) || 0 } : {}),
+        ...(canSetBudget
+          ? {
+              budget_total: parseFloat(budget) || 0,
+              ...(ownerId ? { user_id: Number(ownerId) } : {}),
+            }
+          : {}),
         rate_limit: parseInt(rateLimit, 10) || 0,
         rate_limit_window: 60,
       });
@@ -102,6 +257,7 @@ export default function VirtualKeysPage() {
     setEditName(key.name);
     setEditBudget(String(key.budget_total ?? 0));
     setEditRateLimit(String(key.rate_limit ?? 0));
+    setEditOwner(key.user_id ? String(key.user_id) : "");
     setEditProviderNames(parseProviders(key.providers));
     setEditOpen(true);
   }
@@ -126,6 +282,7 @@ export default function VirtualKeysPage() {
           rate_limit: parseInt(editRateLimit, 10) || 0,
           rate_limit_window: 60,
           providers: editProviderNames,
+          ...(canSetBudget && editOwner ? { user_id: Number(editOwner) } : {}),
         },
       });
       toast.success("virtual key updated", { description: editName.trim() });
@@ -152,11 +309,13 @@ export default function VirtualKeysPage() {
   return (
     <div className="scan-in">
       <PageHeader
-        code="03 / auth"
+        code="04 / auth"
         title="Virtual Keys"
         description="Issued credentials with budget and rate-limit tracking"
         actions={
-          canCreateKey ? (
+          <div className="flex items-center gap-2">
+            <ViewToggle value={viewMode} onChange={setViewMode} />
+          {canCreateKey ? (
           <Sheet open={open} onOpenChange={setOpen}>
             <SheetTrigger asChild>
               <Button size="sm">
@@ -212,6 +371,24 @@ export default function VirtualKeysPage() {
                     min="0"
                   />
                 </div>
+                {canSetBudget && memberOptions.length > 0 && (
+                  <div className="space-y-2">
+                    <Label htmlFor="k-owner">owner (cost attribution)</Label>
+                    <select
+                      id="k-owner"
+                      value={ownerId}
+                      onChange={(e) => setOwnerId(e.target.value)}
+                      className="h-9 w-full rounded-sm border border-input bg-background px-3 font-mono text-[13px]"
+                    >
+                      <option value="">me</option>
+                      {memberOptions.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.username} · {m.role}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
                 <SheetFooter className="mt-auto flex-row gap-2 border-t border-border pt-4">
                   <Button
                     type="button"
@@ -232,7 +409,8 @@ export default function VirtualKeysPage() {
               </form>
             </SheetContent>
           </Sheet>
-          ) : undefined
+          ) : null}
+          </div>
         }
       />
 
@@ -261,6 +439,24 @@ export default function VirtualKeysPage() {
                 <Input id="ek-rate" type="number" value={editRateLimit} onChange={(e) => setEditRateLimit(e.target.value)} min="0" />
               </div>
             </div>
+            {canSetBudget && memberOptions.length > 0 && (
+              <div className="space-y-2">
+                <Label htmlFor="ek-owner">owner (cost attribution)</Label>
+                <select
+                  id="ek-owner"
+                  value={editOwner}
+                  onChange={(e) => setEditOwner(e.target.value)}
+                  className="h-9 w-full rounded-sm border border-input bg-background px-3 font-mono text-[13px]"
+                >
+                  <option value="">unassigned</option>
+                  {memberOptions.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.username} · {m.role}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div className="space-y-2">
               <Label>bound providers</Label>
               <div className="rounded-sm border border-border bg-background/40 p-3 font-mono text-[12px]">
@@ -316,6 +512,52 @@ export default function VirtualKeysPage() {
           description="Issue a virtual key to start routing authenticated traffic."
           icon={<KeyRound className="h-5 w-5" />}
         />
+      ) : viewMode === "list" ? (
+        <Panel>
+          <PanelBody className="p-0">
+            <div className="grid grid-cols-[minmax(0,1.15fr)_minmax(0,0.6fr)_minmax(0,1.5fr)_minmax(0,0.6fr)_minmax(0,0.85fr)_184px] gap-3 border-b border-border px-4 py-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground/60">
+              <span>key</span>
+              <span>owner</span>
+              <span>budget (used / total)</span>
+              <span>rate limit</span>
+              <span>providers</span>
+              <span className="text-right">actions</span>
+            </div>
+            {keys.map((k) => (
+              <div
+                key={k.id}
+                className="grid grid-cols-[minmax(0,1.15fr)_minmax(0,0.6fr)_minmax(0,1.5fr)_minmax(0,0.6fr)_minmax(0,0.85fr)_184px] items-center gap-3 border-b border-border/70 px-4 py-3 last:border-0"
+              >
+                <div className="min-w-0">
+                  <div className="truncate font-mono text-[13px] text-foreground">{k.name}</div>
+                  <div className="truncate font-mono text-[10px] text-muted-foreground/60">
+                    {k.key_hash_prefix || `key #${k.id}`}
+                  </div>
+                </div>
+                <span className="truncate font-mono text-[11px] text-muted-foreground">
+                  {keyOwnerLabel(k)}
+                </span>
+                <KeyBudgetCell keyRef={k} compact />
+                <span className="num font-mono text-[11px] text-foreground">
+                  {k.rate_limit && k.rate_limit > 0 ? `${k.rate_limit}/min` : "∞"}
+                </span>
+                <span className="truncate font-mono text-[11px] text-muted-foreground">
+                  {boundProvidersLabel(k)}
+                </span>
+                <div className="flex items-center justify-end gap-1">
+                  <KeyStatusBadge keyRef={k} />
+                  <KeyActions
+                    keyRef={k}
+                    canManageKey={canManageKey}
+                    deletePending={deleteMut.isPending}
+                    onEdit={() => openEdit(k)}
+                    onDelete={() => handleDelete(k.id, k.name)}
+                  />
+                </div>
+              </div>
+            ))}
+          </PanelBody>
+        </Panel>
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {keys.map((k) => {
@@ -340,48 +582,20 @@ export default function VirtualKeysPage() {
                       </div>
                     </div>
                   </div>
-                  {isActive ? (
-                    overBudget ? (
-                      <Badge variant="warning">over budget</Badge>
-                    ) : (
-                      <Badge variant="success">active</Badge>
-                    )
-                  ) : (
-                    <Badge variant="outline">revoked</Badge>
-                  )}
+                  <KeyStatusBadge keyRef={k} />
                 </PanelHeader>
 
                 <PanelBody className="flex-1 space-y-3">
-                  <div className="space-y-1.5">
-                    <div className="flex items-baseline justify-between font-mono text-[11px]">
-                      <span className="flex items-center gap-1.5 text-muted-foreground">
-                        <Wallet className="h-3 w-3" /> budget
-                      </span>
-                      <span className="num">
-                        <span className="text-foreground">
-                          ${fmtUsd(k.budget_used)}
-                        </span>
-                        <span className="text-muted-foreground">
-                          {" "}
-                          / ${fmtUsd(k.budget_total)}
-                        </span>
-                      </span>
-                    </div>
-                    <div className="relative h-1.5 overflow-hidden rounded-sm bg-secondary">
-                      <div
-                        className={`absolute inset-y-0 left-0 ${
-                          overBudget
-                            ? "bg-warning glow-amber"
-                            : "bg-primary box-glow-amber"
-                        }`}
-                        style={{ width: `${usage}%` }}
-                      />
-                    </div>
-                    <div className="flex justify-end font-mono text-[10px] text-muted-foreground/60">
-                      {usage.toFixed(1)}% used
-                    </div>
-                  </div>
+                  <KeyBudgetCell keyRef={k} />
                   <div className="space-y-2 font-mono text-[11px]">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="flex items-center gap-1.5 text-muted-foreground">
+                        <User className="h-3 w-3" /> owner
+                      </span>
+                      <span className="truncate text-muted-foreground">
+                        {keyOwnerLabel(k)}
+                      </span>
+                    </div>
                     <div className="flex items-center justify-between gap-2">
                       <span className="flex items-center gap-1.5 text-muted-foreground">
                         <Gauge className="h-3 w-3" /> rate limit
@@ -401,7 +615,6 @@ export default function VirtualKeysPage() {
                   </div>
                 </PanelBody>
 
-                {/* Footer — created date + actions */}
                 <div className="flex items-center justify-between border-t border-border px-4 py-2.5">
                   <span className="font-mono text-[9px] uppercase tracking-wider text-muted-foreground/50">
                     {new Date(k.created_at).toLocaleDateString("en-US", {
@@ -411,43 +624,13 @@ export default function VirtualKeysPage() {
                     })}
                   </span>
                   <div className="flex items-center gap-1">
-                    {canManageKey && (
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        className="text-muted-foreground hover:text-primary"
-                        onClick={() => openEdit(k)}
-                        aria-label="Edit key"
-                      >
-                        <Pencil className="h-3.5 w-3.5" />
-                      </Button>
-                    )}
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      className="text-muted-foreground hover:text-primary"
-                      onClick={() => {
-                        navigator.clipboard
-                          ?.writeText(k.key_hash_prefix || "")
-                          .then(() => toast.success("key prefix copied"))
-                          .catch(() => toast.error("clipboard unavailable"));
-                      }}
-                      aria-label="Copy key prefix"
-                    >
-                      <Copy className="h-3.5 w-3.5" />
-                    </Button>
-                    {canManageKey && (
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        className="text-muted-foreground hover:text-destructive hover:border-destructive/40"
-                        onClick={() => handleDelete(k.id, k.name)}
-                        disabled={deleteMut.isPending}
-                        aria-label="Revoke key"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    )}
+                    <KeyActions
+                      keyRef={k}
+                      canManageKey={canManageKey}
+                      deletePending={deleteMut.isPending}
+                      onEdit={() => openEdit(k)}
+                      onDelete={() => handleDelete(k.id, k.name)}
+                    />
                   </div>
                 </div>
               </Panel>

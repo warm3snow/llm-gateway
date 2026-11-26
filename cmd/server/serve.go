@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -31,7 +30,6 @@ import (
 	_ "github.com/warm3snow/llm-gateway/internal/provider/azure"
 	_ "github.com/warm3snow/llm-gateway/internal/provider/cohere"
 	_ "github.com/warm3snow/llm-gateway/internal/provider/deepseek"
-	_ "github.com/warm3snow/llm-gateway/internal/provider/deterministic"
 	_ "github.com/warm3snow/llm-gateway/internal/provider/gemini"
 	_ "github.com/warm3snow/llm-gateway/internal/provider/glm"
 	_ "github.com/warm3snow/llm-gateway/internal/provider/groq"
@@ -123,7 +121,6 @@ func runServe(cmd *cobra.Command, args []string) error {
 		&models.AlertEvent{},
 		&models.ProviderConfig{},
 		&models.ProviderHealth{},
-		&models.CacheEntry{},
 		&models.ModelPricing{},
 	)
 	if migrateErr != nil {
@@ -137,11 +134,11 @@ func runServe(cmd *cobra.Command, args []string) error {
 		log.Printf("Warning: Failed to bootstrap tenants/users: %v", err)
 	}
 
-	// Seed providers from config.yaml into the DB (WARN+skip on name conflict),
-	// then reload the full provider set from the DB into cfg.Gateway.Providers.
-	// The DB is the source of truth at runtime; the in-memory map is a cache the
-	// proxy reads live (proxyHandler and adminHandler share this cfg pointer).
-	seedProvidersFromConfig(cfg)
+	// Load the provider set from the DB (the single source of truth) into
+	// cfg.Gateway.Providers. The in-memory map is a cache the proxy reads
+	// live (proxyHandler and adminHandler share this cfg pointer); admin
+	// API mutations keep it in sync.
+	loadProvidersFromDB(cfg)
 
 	// Start the asynchronous usage-record writer. Draining happens during
 	// graceful shutdown below so buffered records are flushed before exit.
@@ -231,14 +228,34 @@ func runServe(cmd *cobra.Command, args []string) error {
 		budgetTracker.Start()
 		log.Printf("[BUDGET] async tracker enabled queue_size=%d batch_size=%d flush_interval=%s", cfg.Budget.QueueSize, cfg.Budget.BatchSize, cfg.Budget.FlushInterval)
 	}
+	// Reset month-to-date budgets whose calendar month rolled over, then
+	// keep checking hourly for the duration of the process.
+	if n, err := service.ResetMonthlyBudgets(database.GetDB()); err != nil {
+		log.Printf("[BUDGET] WARN: monthly budget reset failed: %v", err)
+	} else if n > 0 {
+		log.Printf("[BUDGET] monthly budget reset applied to %d rows", n)
+	}
+	go func() {
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			_, _ = service.ResetMonthlyBudgets(database.GetDB())
+		}
+	}()
 
 	healthCtx, stopHealthChecks := context.WithCancel(context.Background())
 	providerHealthService := service.NewProviderHealthService(proxyHandler.ProviderFactory)
 	providerHealthService.Start(healthCtx, 5*time.Minute)
 
+	// Apply the masking configuration from config.yaml to the live registry.
+	if err := service.ApplyRedactConfig(cfg.Gateway.Redact); err != nil {
+		log.Printf("[REDACT] WARN: invalid redact config, masking stays off: %v", err)
+	}
+
 	// API 路由（需要虚拟密钥认证 + 缓存 + 用量记录）
 	v1 := router.Group("/v1")
 	v1.Use(middleware.VirtualKeyAuthWithBudgetTracker(cfg, budgetTracker))
+	v1.Use(middleware.RedactMiddleware())
 	v1.Use(middleware.GuardrailMiddleware(guardrailManager))
 	v1.Use(middleware.IdempotencyMiddleware(service.NewIdempotencyService(), 24*time.Hour))
 	v1.Use(middleware.UsageRecordMiddlewareWithBudgetTracker(cfg, virtualKeyService, budgetTracker))
@@ -252,8 +269,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 		v1.POST("/audio/speech", proxyHandler.HandleAudioSpeech)
 		v1.POST("/audio/transcriptions", proxyHandler.HandleAudioTranscription)
 		v1.POST("/audio/translations", proxyHandler.HandleAudioTranslation)
+		v1.POST("/messages", proxyHandler.HandleMessages)
+		v1.POST("/messages/count_tokens", proxyHandler.HandleAnthropicCountTokens)
 		v1.Any("/proxy/*path", proxyHandler.ProxyRequest)
-		v1.POST("/chat/completions/stream", proxyHandler.HandleStreamRequest)
 	}
 
 	// 认证路由（不需要JWT）
@@ -294,6 +312,18 @@ func runServe(cmd *cobra.Command, args []string) error {
 	// 用户管理路由（需要JWT，按角色授权）
 	userHandler := handler.NewUserHandler()
 	userHandler.RegisterRoutesWithAuth(router, jwtMiddleware)
+
+	// 自助服务路由（需要JWT，任何登录用户可用）
+	meHandler := handler.NewMeHandler()
+	meHandler.RegisterRoutesWithAuth(router, jwtMiddleware)
+
+	// 模型定价路由（需要JWT + super_admin）
+	pricingHandler := handler.NewPricingHandler()
+	pricingHandler.RegisterRoutesWithAuth(router, jwtMiddleware)
+
+	// 敏感信息脱敏配置路由（需要JWT + super_admin）
+	redactHandler := handler.NewRedactHandler(cfg)
+	redactHandler.RegisterRoutesWithAuth(router, jwtMiddleware)
 
 	// 创建 HTTP 服务器
 	srv := &http.Server{
@@ -338,22 +368,10 @@ func runServe(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func seedProvidersFromConfig(cfg *config.Config) {
+func loadProvidersFromDB(cfg *config.Config) {
 	svc := service.NewProviderConfigService()
 
-	for name, opts := range cfg.Gateway.Providers {
-		if _, err := svc.Create(name, opts); err != nil {
-			if errors.Is(err, service.ErrProviderAlreadyExists) {
-				log.Printf("[PROVIDER] WARN: provider %q already exists in DB, skipping config.yaml seed", name)
-				continue
-			}
-			log.Printf("[PROVIDER] WARN: failed to seed provider %q into DB: %v", name, err)
-		} else {
-			log.Printf("[PROVIDER] seeded provider %q from config.yaml into DB", name)
-		}
-	}
-
-	// DB rows win after startup; the proxy reads this map as its runtime cache.
+	// The proxy reads this map as its runtime cache.
 	rows, err := svc.List()
 	if err != nil {
 		log.Printf("[PROVIDER] WARN: failed to load providers from DB: %v", err)

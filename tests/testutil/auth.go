@@ -2,11 +2,13 @@ package testutil
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/warm3snow/llm-gateway/internal/config"
+	"github.com/warm3snow/llm-gateway/internal/models"
 )
 
 type TokenClaims struct {
@@ -37,4 +39,9 @@ func SignJWT(t *testing.T, cfg *config.Config, claims TokenClaims) string {
 
 func Authorize(req *http.Request, token string) {
 	req.Header.Set("Authorization", "Bearer "+token)
+}
+
+// AdminEmail returns the bootstrap super_admin's login email for a username.
+func AdminEmail(username string) string {
+	return strings.ToLower(strings.TrimSpace(username)) + "@" + models.EmailDomain
 }

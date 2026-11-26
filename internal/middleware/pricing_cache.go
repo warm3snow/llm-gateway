@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/warm3snow/llm-gateway/internal/models"
+	"gorm.io/gorm"
 )
 
 const defaultPricingCacheMaxEntries = 10000
@@ -16,6 +17,21 @@ type pricingCache struct {
 	negativeTTL time.Duration
 	maxEntries  int
 	now         func() time.Time
+	// db is the database the cached rows came from. Bind switches the cache
+	// to a new database and drops every entry, so cached pricing never
+	// leaks across databases (tests, reconnections).
+	db *gorm.DB
+}
+
+// bind invalidates all entries when the cache is pointed at a different DB.
+func (c *pricingCache) bind(db *gorm.DB) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.db == db {
+		return
+	}
+	c.db = db
+	c.entries = make(map[string]pricingCacheEntry)
 }
 
 type pricingCacheEntry struct {

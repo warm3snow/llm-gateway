@@ -8,37 +8,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { TerminalSquare, ChevronRight, ShieldCheck } from "lucide-react";
 
-const bootLines = [
-  "initializing control plane",
-  "loading provider registry",
-  "mounting routing strategies",
-  "ready.",
-];
-
 export default function LoginPage() {
   const router = useRouter();
-  const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [booted, setBooted] = useState(false);
-  const [visibleBoot, setVisibleBoot] = useState<string[]>([]);
-
-  // Simulated boot sequence — staggered lines for the CRT warmup feel.
   useEffect(() => {
     sessionStorage.removeItem("tenant_login_token");
     sessionStorage.removeItem("tenant_options");
-    let i = 0;
-    const timer = setInterval(() => {
-      if (i < bootLines.length) {
-        setVisibleBoot((prev) => [...prev, bootLines[i]]);
-        i++;
-      } else {
-        clearInterval(timer);
-        setBooted(true);
-      }
-    }, 280);
-    return () => clearInterval(timer);
   }, []);
 
   async function handleSubmit(e: FormEvent) {
@@ -46,12 +24,23 @@ export default function LoginPage() {
     setError("");
     sessionStorage.removeItem("tenant_login_token");
     sessionStorage.removeItem("tenant_options");
-    if (!username.trim()) return setError("username required");
-    if (password.length < 3) return setError("password too short");
+    const trimmed = email.trim().toLowerCase();
+    if (!trimmed) {
+      setError("email required");
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+      setError("enter a valid email, e.g. user123456@llmgw.org");
+      return;
+    }
+    if (password.length < 3) {
+      setError("password too short");
+      return;
+    }
 
     setLoading(true);
     try {
-      const res = await api.login({ username, password });
+      const res = await api.login({ username: trimmed, password });
       if (res.status === "success" && res.token) {
         sessionStorage.removeItem("tenant_login_token");
         sessionStorage.removeItem("tenant_options");
@@ -130,92 +119,72 @@ export default function LoginPage() {
             </div>
           </div>
 
-          {/* Boot lines */}
-          <div className="space-y-0.5 font-mono text-[11px] text-muted-foreground/70">
-            {visibleBoot.map((line, i) => (
-              <div key={i} className="scan-in">
-                <span className="text-success">›</span> {line}
-              </div>
-            ))}
-            {!booted && (
-              <div>
-                <span className="text-primary">›</span>{" "}
-                <span className="blink">█</span>
+          <div className="space-y-4">
+            {/* Email */}
+            <div className="space-y-2">
+              <Label htmlFor="email">
+                <span className="text-primary">user@</span>llm-gw:~$
+              </Label>
+              <Input
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  setError("");
+                }}
+                placeholder="user123456@llmgw.org"
+                autoComplete="username"
+                autoFocus
+                required
+                className="font-mono"
+              />
+            </div>
+
+            {/* Password */}
+            <div className="space-y-2">
+              <Label htmlFor="password">
+                <span className="text-primary">pass:</span> authenticate
+              </Label>
+              <Input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  setError("");
+                }}
+                placeholder="••••••••"
+                className="font-mono"
+              />
+            </div>
+
+            {/* Error */}
+            {error && (
+              <div className="flex items-center gap-2 border border-destructive/30 bg-destructive/5 px-3 py-2 font-mono text-[11px] text-destructive scan-in">
+                <span className="led bg-destructive text-destructive pulse-dot" />
+                err: {error}
               </div>
             )}
-          </div>
 
-          {booted && (
-            <div className="space-y-4 scan-in">
-              {/* Username */}
-              <div className="space-y-2">
-                <Label htmlFor="username">
-                  <span className="text-primary">user@</span>llm-gw:~$
-                </Label>
-                <Input
-                  id="username"
-                  value={username}
-                  onChange={(e) => {
-                    setUsername(e.target.value);
-                    setError("");
-                  }}
-                  placeholder="admin or admin@platform.llmgw"
-                  autoFocus
-                  className="font-mono"
-                />
-              </div>
-
-              {/* Password */}
-              <div className="space-y-2">
-                <Label htmlFor="password">
-                  <span className="text-primary">pass:</span> authenticate
-                </Label>
-                <Input
-                  id="password"
-                  type="password"
-                  value={password}
-                  onChange={(e) => {
-                    setPassword(e.target.value);
-                    setError("");
-                  }}
-                  placeholder="••••••••"
-                  className="font-mono"
-                />
-              </div>
-
-              {/* Error */}
-              {error && (
-                <div className="flex items-center gap-2 border border-destructive/30 bg-destructive/5 px-3 py-2 font-mono text-[11px] text-destructive scan-in">
-                  <span className="led bg-destructive text-destructive pulse-dot" />
-                  err: {error}
-                </div>
+            <Button type="submit" size="lg" className="w-full" disabled={loading}>
+              {loading ? (
+                <>
+                  <span className="blink">█</span>
+                  authenticating…
+                </>
+              ) : (
+                <>
+                  connect
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </>
               )}
-
-              <Button
-                type="submit"
-                size="lg"
-                className="w-full"
-                disabled={loading}
-              >
-                {loading ? (
-                  <>
-                    <span className="blink">█</span>
-                    authenticating…
-                  </>
-                ) : (
-                  <>
-                    connect
-                    <ChevronRight className="h-3.5 w-3.5" />
-                  </>
-                )}
-              </Button>
-            </div>
-          )}
+            </Button>
+          </div>
         </form>
 
-        {/* Footer — hint */}
         <div className="mt-3 flex items-center justify-between font-mono text-[9px] uppercase tracking-wider text-muted-foreground/40">
-          <span>default: admin / admin123</span>
+          <span>sign in with your account</span>
           <span>v1.0</span>
         </div>
       </div>

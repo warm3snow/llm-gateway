@@ -15,10 +15,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { api, currentTenant, currentUser } from "@/lib/api";
+import { api } from "@/lib/api";
+import { useSession } from "@/lib/use-session";
 import { CommandPalette } from "@/components/layout/CommandPalette";
 
 const segmentLabels: Record<string, string> = {
@@ -38,13 +38,12 @@ export default function TopBar({
   menuButton?: React.ReactNode;
 }) {
   const pathname = usePathname();
-  const { resolvedTheme, setTheme } = useTheme();
-  const [mounted, setMounted] = useState(false);
+  const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [searchOpen, setSearchOpen] = useState(false);
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [changingPassword, setChangingPassword] = useState(false);
-  const [session] = useState(() => ({ user: currentUser(), tenant: currentTenant() }));
+  const session = useSession();
   const username = session.user?.username ?? "unknown";
   const avatarLabel = username.slice(0, 2).toLowerCase() || "--";
   const tenantLabel = session.tenant?.name ?? (session.user?.tenant_id != null ? `tenant #${session.user.tenant_id}` : "platform");
@@ -53,9 +52,29 @@ export default function TopBar({
     : session.user?.role;
 
   useEffect(() => {
-    const frame = requestAnimationFrame(() => setMounted(true));
+    const frame = requestAnimationFrame(() => {
+      try {
+        setTheme(window.localStorage.getItem("theme") === "light" ? "light" : "dark");
+      } catch {
+        // storage unavailable — keep the dark default
+      }
+    });
     return () => cancelAnimationFrame(frame);
   }, []);
+
+  const toggleTheme = () => {
+    const next = theme === "dark" ? "light" : "dark";
+    const root = document.documentElement;
+    root.classList.remove("light", "dark");
+    root.classList.add(next);
+    root.style.colorScheme = next;
+    setTheme(next);
+    try {
+      window.localStorage.setItem("theme", next);
+    } catch {
+      // storage unavailable — the class change still applies for this session
+    }
+  };
 
   // Build breadcrumb segments
   const segments = pathname.split("/").filter(Boolean);
@@ -145,10 +164,10 @@ export default function TopBar({
           variant="ghost"
           size="icon"
           className="h-8 w-8 text-muted-foreground hover:text-foreground"
-          onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
+          onClick={toggleTheme}
           aria-label="Toggle theme"
         >
-          {mounted && resolvedTheme === "dark" ? (
+          {theme === "dark" ? (
             <Sun className="h-4 w-4" />
           ) : (
             <Moon className="h-4 w-4" />

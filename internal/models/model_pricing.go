@@ -10,15 +10,16 @@ import (
 // ModelPricing stores per-model token pricing (cents per token).
 // Source is typically "portkey" (synced from Portkey-AI/models).
 type ModelPricing struct {
-	ID             uint      `gorm:"primaryKey" json:"id"`
-	Provider       string    `gorm:"size:32;index:idx_provider_model,unique" json:"provider"`
-	Model          string    `gorm:"size:128;index:idx_provider_model,unique" json:"model"`
-	InputPrice     float64   `gorm:"type:decimal(12,8)" json:"input_price"`       // cents per token
-	OutputPrice    float64   `gorm:"type:decimal(12,8)" json:"output_price"`     // cents per token
-	CacheReadPrice float64   `gorm:"type:decimal(12,8);default:0" json:"cache_read_price"` // cents per token
-	Currency       string    `gorm:"size:8;default:USD" json:"currency"`
-	Source         string    `gorm:"size:32;default:portkey" json:"source"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID              uint      `gorm:"primaryKey" json:"id"`
+	Provider        string    `gorm:"size:32;index:idx_provider_model,unique" json:"provider"`
+	Model           string    `gorm:"size:128;index:idx_provider_model,unique" json:"model"`
+	InputPrice      float64   `gorm:"type:decimal(12,8)" json:"input_price"`                 // cents per token
+	OutputPrice     float64   `gorm:"type:decimal(12,8)" json:"output_price"`                // cents per token
+	CacheReadPrice  float64   `gorm:"type:decimal(12,8);default:0" json:"cache_read_price"`  // cents per token; 0 falls back to InputPrice when billing cache-read tokens
+	CacheWritePrice float64   `gorm:"type:decimal(12,8);default:0" json:"cache_write_price"` // cents per token
+	Currency        string    `gorm:"size:8;default:USD" json:"currency"`
+	Source          string    `gorm:"size:32;default:portkey" json:"source"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 // TableName specifies the table name.
@@ -32,12 +33,13 @@ func UpsertModelPricing(db *gorm.DB, mp *ModelPricing) error {
 	return db.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "provider"}, {Name: "model"}},
 		DoUpdates: clause.Assignments(map[string]interface{}{
-			"input_price":      mp.InputPrice,
-			"output_price":     mp.OutputPrice,
-			"cache_read_price": mp.CacheReadPrice,
-			"currency":         mp.Currency,
-			"source":           mp.Source,
-			"updated_at":       mp.UpdatedAt,
+			"input_price":       mp.InputPrice,
+			"output_price":      mp.OutputPrice,
+			"cache_read_price":  mp.CacheReadPrice,
+			"cache_write_price": mp.CacheWritePrice,
+			"currency":          mp.Currency,
+			"source":            mp.Source,
+			"updated_at":        mp.UpdatedAt,
 		}),
 	}).Create(mp).Error
 }

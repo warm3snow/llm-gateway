@@ -121,7 +121,7 @@ func (h *StatsHandler) RegisterRoutesWithAuth(router, jwtMiddleware) { ... }
 1. Create `internal/provider/{name}/{name}.go`
 2. Implement the `Provider` interface
 3. Register in `internal/provider/provider.go` factory
-4. Add to `supportedProviders` in `configs/config.yaml`
+4. Register the provider row in the database (admin console → Model Management) — `configs/config.yaml` no longer lists providers
 
 ### Add a New Frontend Page
 
@@ -167,7 +167,7 @@ func (h *StatsHandler) RegisterRoutesWithAuth(router, jwtMiddleware) { ... }
 |---|---|
 | `make dev` | Start backend + frontend in foreground (Ctrl+C to stop) |
 | `make start` | Start backend + frontend in background; logs to `/tmp/llm-gateway-*.log` |
-| `make stop` | Kill all backend + frontend processes |
+| `make stop` | Stop backend + frontend, including Next.js child workers (`scripts/dev-stop.sh`) |
 | `make restart` | `stop` + `start` |
 | `make build` | Build Go binary + Next.js static export |
 | `make test` | Run all Go tests |

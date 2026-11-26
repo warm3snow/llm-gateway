@@ -20,7 +20,8 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
-import { api, currentRole } from "@/lib/api";
+import { api } from "@/lib/api";
+import { useRole } from "@/lib/use-session";
 import { queryKeys } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -139,7 +140,7 @@ export function CommandPalette({
   const inputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
-  const [role] = useState<string | null>(() => currentRole());
+  const role = useRole();
 
   const canManageProviders = role === "super_admin";
   const canManageTenants = role === "super_admin";

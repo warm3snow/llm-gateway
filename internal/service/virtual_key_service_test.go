@@ -100,16 +100,16 @@ func TestVirtualKeyServiceListsKeysByCreator(t *testing.T) {
 	_, _, err = svc.Create(1, &models.VirtualKeyRequest{Name: "second"}, &creatorTwo, "user-b")
 	require.NoError(t, err)
 
-	keys, err := svc.ListByCreator(1, creatorOne)
+	keys, err := svc.ListByOwner(1, creatorOne)
 	require.NoError(t, err)
 	require.Len(t, keys, 1)
 	assert.Equal(t, first.ID, keys[0].ID)
 
-	got, err := svc.GetByIDAndCreator(1, first.ID, creatorOne)
+	got, err := svc.GetByIDAndOwner(1, first.ID, creatorOne)
 	require.NoError(t, err)
 	assert.Equal(t, first.ID, got.ID)
 
-	got, err = svc.GetByIDAndCreator(1, first.ID, creatorTwo)
+	got, err = svc.GetByIDAndOwner(1, first.ID, creatorTwo)
 	assert.Nil(t, got)
 	assert.Error(t, err)
 }

@@ -1,8 +1,10 @@
 package gemini
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -84,9 +86,19 @@ func (p *GeminiProvider) ChatCompletion(ctx context.Context, req *types.ChatComp
 		model = "gemini-pro"
 	}
 
-	url := fmt.Sprintf("%s/models/gemini-%s:generateContent?key=%s", p.BaseURL, model, p.APIKey)
+	// 流式请求走 streamGenerateContent?alt=sse；非流式走 generateContent。
+	action := ":generateContent"
+	if req.Stream {
+		action = ":streamGenerateContent?alt=sse"
+	}
+
+	url := fmt.Sprintf("%s/models/gemini-%s%s&key=%s", p.BaseURL, model, action, p.APIKey)
 	if strings.Contains(p.BaseURL, "googleapis.com") {
-		url = fmt.Sprintf("%s/models/%s:generateContent?key=%s", p.BaseURL, req.Model, p.APIKey)
+		sep := "&"
+		if action[0] == ':' {
+			sep = "?"
+		}
+		url = fmt.Sprintf("%s/models/%s%s%skey=%s", p.BaseURL, req.Model, action, sep, p.APIKey)
 	}
 
 	bodyBytes, _ := json.Marshal(geminiReq)
@@ -106,8 +118,145 @@ func (p *GeminiProvider) ChatCompletion(ctx context.Context, req *types.ChatComp
 		return resp, nil
 	}
 
+	// 流式响应把 Gemini SSE 翻译成 OpenAI chat chunk SSE。
+	if req.Stream && strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream") {
+		return streamGeminiToOpenAI(resp, req.Model), nil
+	}
+
 	// 转换响应格式
 	return convertGeminiResponse(resp)
+}
+
+// streamGeminiToOpenAI wraps a Gemini streamGenerateContent SSE stream and
+// emits OpenAI chat.completion.chunk events, ending with a usage chunk.
+func streamGeminiToOpenAI(resp *http.Response, model string) *http.Response {
+	pr, pw := io.Pipe()
+	go func() {
+		defer pw.Close()
+		err := translateGeminiStream(resp.Body, pw, model)
+		if err != nil && err != io.EOF && err != context.Canceled {
+			_ = pw.CloseWithError(err)
+		}
+	}()
+	out := &http.Response{
+		Status:     resp.Status,
+		StatusCode: resp.StatusCode,
+		Header:     resp.Header.Clone(),
+		Body:       pr,
+	}
+	out.Header.Set("Content-Type", "text/event-stream")
+	return out
+}
+
+// translateGeminiStream reads Gemini generateContent SSE payloads and writes
+// OpenAI-format SSE data lines to w.
+func translateGeminiStream(r io.Reader, w io.Writer, model string) error {
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	writeChunk := func(payload map[string]interface{}) error {
+		data, err := json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+		_, err = fmt.Fprintf(w, "data: %s\n\n", data)
+		return err
+	}
+
+	sawContent := false
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		if payload == "" {
+			continue
+		}
+		var event struct {
+			Candidates []struct {
+				Content struct {
+					Parts []struct {
+						Text string `json:"text"`
+					} `json:"parts"`
+				} `json:"content"`
+				FinishReason string `json:"finishReason"`
+			} `json:"candidates"`
+			UsageMetadata *struct {
+				PromptTokenCount        int `json:"promptTokenCount"`
+				CandidatesTokenCount    int `json:"candidatesTokenCount"`
+				TotalTokenCount         int `json:"totalTokenCount"`
+				CachedContentTokenCount int `json:"cachedContentTokenCount"`
+				ThoughtsTokenCount      int `json:"thoughtsTokenCount"`
+			} `json:"usageMetadata"`
+		}
+		if err := json.Unmarshal([]byte(payload), &event); err != nil {
+			continue
+		}
+
+		for _, cand := range event.Candidates {
+			for _, part := range cand.Content.Parts {
+				if part.Text == "" {
+					continue
+				}
+				sawContent = true
+				if err := writeChunk(map[string]interface{}{
+					"id": "chatcmpl-gemini", "object": "chat.completion.chunk", "model": model,
+					"choices": []map[string]interface{}{
+						{"index": 0, "delta": map[string]interface{}{"content": part.Text}},
+					},
+				}); err != nil {
+					return err
+				}
+			}
+			if cand.FinishReason != "" {
+				finish := "stop"
+				if cand.FinishReason == "MAX_TOKENS" {
+					finish = "length"
+				}
+				if err := writeChunk(map[string]interface{}{
+					"id": "chatcmpl-gemini", "object": "chat.completion.chunk", "model": model,
+					"choices": []map[string]interface{}{
+						{"index": 0, "delta": map[string]interface{}{}, "finish_reason": finish},
+					},
+				}); err != nil {
+					return err
+				}
+			}
+		}
+
+		if m := event.UsageMetadata; m != nil {
+			prompt := m.PromptTokenCount
+			cacheRead := m.CachedContentTokenCount
+			if cacheRead > 0 && cacheRead <= prompt {
+				prompt -= cacheRead
+			} else {
+				cacheRead = 0
+			}
+			if err := writeChunk(map[string]interface{}{
+				"id": "chatcmpl-gemini", "object": "chat.completion.chunk", "model": model,
+				"choices": []map[string]interface{}{},
+				"usage": map[string]interface{}{
+					"prompt_tokens":     prompt,
+					"completion_tokens": m.CandidatesTokenCount,
+					"total_tokens":      m.TotalTokenCount,
+					"cache_read":        cacheRead,
+					"reasoning":         m.ThoughtsTokenCount,
+				},
+			}); err != nil {
+				return err
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	if !sawContent {
+		_, err := fmt.Fprint(w, "data: [DONE]\n\n")
+		return err
+	}
+	_, err := fmt.Fprint(w, "data: [DONE]\n\n")
+	return err
 }
 
 // Completion 文本补全 — Gemini 不支持，返回错误
@@ -277,14 +426,10 @@ func convertGeminiResponse(resp *http.Response) (*http.Response, error) {
 			{
 				"index":         0,
 				"message":       map[string]interface{}{"role": "assistant", "content": text},
-				"finish_reason": "stop",
+				"finish_reason": finishReasonFromGemini(geminiResp),
 			},
 		},
-		"usage": map[string]interface{}{
-			"prompt_tokens":     0,
-			"completion_tokens": len(strings.Split(text, " ")),
-			"total_tokens":      0,
-		},
+		"usage": geminiUsageToOpenAI(geminiResp),
 	}
 
 	newBody, _ := json.Marshal(openaiResp)
@@ -296,6 +441,57 @@ func convertGeminiResponse(resp *http.Response) (*http.Response, error) {
 	return resp, nil
 }
 
+// geminiUsageToOpenAI maps usageMetadata to the OpenAI usage shape. Gemini
+// counts cached prompt tokens inside promptTokenCount, so they are split out.
+func geminiUsageToOpenAI(geminiResp map[string]interface{}) map[string]interface{} {
+	empty := map[string]interface{}{"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+	m, ok := geminiResp["usageMetadata"].(map[string]interface{})
+	if !ok {
+		return empty
+	}
+	prompt := jsonInt(m["promptTokenCount"])
+	out := jsonInt(m["candidatesTokenCount"])
+	total := jsonInt(m["totalTokenCount"])
+	cacheRead := jsonInt(m["cachedContentTokenCount"])
+	if cacheRead > 0 && cacheRead <= prompt {
+		prompt -= cacheRead
+	} else {
+		cacheRead = 0
+	}
+	usage := map[string]interface{}{
+		"prompt_tokens":     prompt,
+		"completion_tokens": out,
+		"total_tokens":      total,
+		"cache_read":        cacheRead,
+	}
+	if reasoning := jsonInt(m["thoughtsTokenCount"]); reasoning > 0 {
+		usage["reasoning"] = reasoning
+	}
+	return usage
+}
+
+// finishReasonFromGemini maps a Gemini finishReason to OpenAI's.
+func finishReasonFromGemini(geminiResp map[string]interface{}) string {
+	candidates, _ := geminiResp["candidates"].([]interface{})
+	if len(candidates) == 0 {
+		return "stop"
+	}
+	c, ok := candidates[0].(map[string]interface{})
+	if !ok {
+		return "stop"
+	}
+	switch reason, _ := c["finishReason"].(string); reason {
+	case "MAX_TOKENS":
+		return "length"
+	case "SAFETY":
+		return "content_filter"
+	case "", "STOP":
+		return "stop"
+	default:
+		return "stop"
+	}
+}
+
 func getModelFromGeminiResp(resp map[string]interface{}) string {
 	if model, ok := resp["modelVersion"].(string); ok {
 		return model
@@ -303,14 +499,25 @@ func getModelFromGeminiResp(resp map[string]interface{}) string {
 	return "gemini-pro"
 }
 
+// jsonInt converts a decoded JSON number (float64) to int; nil/other → 0.
+func jsonInt(v interface{}) int {
+	if f, ok := v.(float64); ok {
+		return int(f)
+	}
+	return 0
+}
+
+// randomString returns a random hex id.
 func randomString(n int) string {
-	const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 	b := make([]byte, n)
+	_, _ = rand.Read(b)
 	for i := range b {
-		b[i] = letters[time.Now().UnixNano()%int64(len(letters))]
+		b[i] = letters[int(b[i])%len(letters)]
 	}
 	return string(b)
 }
+
+var letters = "abcdefghijklmnopqrstuvwxyz0123456789"
 
 func init() {
 	provider.RegisterGlobalProvider(string(types.ProviderGemini), NewGeminiProvider)

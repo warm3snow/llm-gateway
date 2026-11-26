@@ -27,8 +27,8 @@ func TestVirtualKeyBudgetExhaustionBlocksFurtherRequests(t *testing.T) {
 	assert.Equal(t, float64(1), key.BudgetUsed)
 
 	second := doChatCompletion(t, router, cfg, virtualKey, nil)
-	assert.Equal(t, http.StatusForbidden, second.Code, second.Body.String())
-	assert.Contains(t, second.Body.String(), "Budget exceeded")
+	assert.Equal(t, http.StatusPaymentRequired, second.Code, second.Body.String())
+	assert.Contains(t, second.Body.String(), "budget exceeded")
 	assert.Equal(t, int64(1), upstream.Calls())
 }
 

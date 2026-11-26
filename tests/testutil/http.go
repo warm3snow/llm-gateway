@@ -33,6 +33,15 @@ func DoJSON(t *testing.T, router *gin.Engine, method, path string, body any) *ht
 	return w
 }
 
+// DoJSONReq serves a pre-built request (with headers already set) and
+// returns the recorded response.
+func DoJSONReq(t *testing.T, router *gin.Engine, req *http.Request) *httptest.ResponseRecorder {
+	t.Helper()
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	return w
+}
+
 func DecodeJSON(t *testing.T, w *httptest.ResponseRecorder, dst any) {
 	t.Helper()
 	if err := json.Unmarshal(w.Body.Bytes(), dst); err != nil {

@@ -14,19 +14,18 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/warm3snow/llm-gateway/internal/config"
 	"github.com/warm3snow/llm-gateway/internal/metrics"
+	"github.com/warm3snow/llm-gateway/internal/middleware"
 	"github.com/warm3snow/llm-gateway/internal/provider"
 	"github.com/warm3snow/llm-gateway/internal/service"
 	"github.com/warm3snow/llm-gateway/internal/types"
 	"github.com/warm3snow/llm-gateway/pkg/cache"
 	"github.com/warm3snow/llm-gateway/pkg/guardrail"
-	"github.com/warm3snow/llm-gateway/pkg/retry"
 )
 
 // ProxyHandler 代理处理器
 type ProxyHandler struct {
 	Config           *config.Config
 	ProviderFactory  *provider.ProviderFactory
-	Retryer          *retry.Retryer
 	Cache            cache.Cache
 	ModelSelector    *service.ModelSelector
 	ModelTracker     *service.ModelConcurrencyTracker
@@ -39,7 +38,6 @@ func NewProxyHandler(cfg *config.Config, c cache.Cache) *ProxyHandler {
 	return &ProxyHandler{
 		Config:          cfg,
 		ProviderFactory: provider.GetGlobalFactory(),
-		Retryer:         retry.NewRetryer(retry.DefaultRetryConfig()),
 		Cache:           c,
 		ModelSelector:   service.NewModelSelector(cfg, tracker),
 		ModelTracker:    tracker,
@@ -50,8 +48,13 @@ func (h *ProxyHandler) SetGuardrailManager(manager *guardrail.GuardrailManager) 
 	h.GuardrailManager = manager
 }
 
-// HandleChatCompletion 处理聊天补全请求
+// HandleChatCompletion 处理聊天补全请求（流式与非流式统一入口：请求里
+// stream=true 时按 SSE 流式转发，否则走缓冲响应）。主 provider 失败且配置
+// 了 fallbacks 时按顺序尝试备选 provider，并把实际尝试次数写入上下文供
+// 用量记录使用。
 func (h *ProxyHandler) HandleChatCompletion(c *gin.Context) {
+	c.Set("request_start", time.Now())
+
 	var req types.ChatCompletionRequest
 
 	// 解析请求
@@ -79,35 +82,117 @@ func (h *ProxyHandler) HandleChatCompletion(c *gin.Context) {
 	}
 	defer finishSelection()
 
-	// 创建 provider
-	prov, err := h.ProviderFactory.Create(opts.Provider, opts)
-	if err != nil {
-		h.abortWithError(c, http.StatusInternalServerError, "provider_error", fmt.Sprintf("Failed to create provider: %v", err))
-		return
+	// 流式请求要求上游带 usage 回来：注入 stream_options.include_usage，
+	// OpenAI 兼容上游会在最后一个 chunk 里带 usage。
+	if req.Stream {
+		if req.StreamOptions == nil {
+			req.StreamOptions = &types.StreamOptions{}
+		}
+		req.StreamOptions.IncludeUsage = true
 	}
 
-	// 发送请求
+	// 主 provider + fallback 链；每一跳按重试配置重试。
+	chain := h.providerChain(opts)
 	ctx := c.Request.Context()
 	var resp *http.Response
-	var respErr error
+	var lastErr error
+	tries := 0
 
-	if opts.Retry != nil {
-		// 使用重试
-		resp, respErr = h.Retryer.DoWithProvider(ctx, opts.Provider, func() (*http.Response, error) {
-			return prov.ChatCompletion(ctx, &req, opts)
-		})
-	} else {
-		resp, respErr = prov.ChatCompletion(ctx, &req, opts)
+	for i, chainOpts := range chain {
+		prov, err := h.ProviderFactory.Create(chainOpts.Provider, chainOpts)
+		if err != nil {
+			lastErr = err
+			tries++
+			continue
+		}
+		attempts := 1
+		if chainOpts.Retry != nil && chainOpts.Retry.Attempts > 0 {
+			attempts = chainOpts.Retry.Attempts
+		}
+		for attempt := 0; attempt < attempts; attempt++ {
+			tries++
+			var hopErr error
+			var hopResp *http.Response
+			hopResp, hopErr = prov.ChatCompletion(ctx, &req, chainOpts)
+			if hopErr == nil && hopResp.StatusCode < 500 && hopResp.StatusCode != http.StatusTooManyRequests && hopResp.StatusCode != http.StatusUnauthorized && hopResp.StatusCode != http.StatusForbidden {
+				// This hop answered; the chain stops here.
+				resp, lastErr = hopResp, nil
+				break
+			}
+			if hopResp != nil {
+				hopResp.Body.Close()
+			}
+			lastErr = hopErr
+			if ctx.Err() != nil {
+				break
+			}
+			time.Sleep(retryWait(attempt, chainOpts.Retry))
+		}
+		if lastErr == nil && resp != nil {
+			break
+		}
+		if i+1 >= len(chain) {
+			break
+		}
 	}
 
-	if respErr != nil {
-		h.abortWithError(c, http.StatusInternalServerError, "request_error", fmt.Sprintf("Request failed: %v", respErr))
+	c.Set(middleware.TriesKey, max(tries, 1))
+
+	if lastErr != nil || resp == nil {
+		h.abortWithError(c, http.StatusBadGateway, "request_error", fmt.Sprintf("Request failed: %v", lastErr))
 		return
 	}
 	defer resp.Body.Close()
 
-	// 处理响应
+	if req.Stream {
+		h.streamChatResponse(c, resp, &req, opts.Provider)
+		return
+	}
 	h.handleResponse(c, resp)
+}
+
+// providerChain returns the primary options followed by each named fallback's
+// resolved options. Missing fallback names are skipped.
+func (h *ProxyHandler) providerChain(primary *types.Options) []*types.Options {
+	chain := []*types.Options{primary}
+	for _, name := range primary.Fallbacks {
+		fallback, ok := h.lookupProvider(name)
+		if !ok || fallback.Provider == "" {
+			continue
+		}
+		if fallback.Provider == primary.Provider && fallback.APIKey == primary.APIKey && fallback.CustomHost == primary.CustomHost {
+			continue
+		}
+		chain = append(chain, fallback)
+	}
+	return chain
+}
+
+func (h *ProxyHandler) lookupProvider(name string) (*types.Options, bool) {
+	h.Config.Gateway.ProvidersMu.RLock()
+	defer h.Config.Gateway.ProvidersMu.RUnlock()
+	opts, ok := h.Config.Gateway.Providers[name]
+	if !ok {
+		return nil, false
+	}
+	copied := opts
+	return &copied, true
+}
+
+// retryWait is the pause between attempts of one provider hop.
+func retryWait(attempt int, settings *types.RetrySettings) time.Duration {
+	min, max := 500*time.Millisecond, 4*time.Second
+	if settings != nil && settings.BackoffMin > 0 {
+		min = time.Duration(settings.BackoffMin) * time.Millisecond
+	}
+	if settings != nil && settings.BackoffMax > 0 {
+		max = time.Duration(settings.BackoffMax) * time.Millisecond
+	}
+	wait := min << attempt
+	if wait > max {
+		wait = max
+	}
+	return wait
 }
 
 // HandleCompletion 处理文本补全请求
@@ -176,22 +261,11 @@ func isAutoModel(model string) bool {
 	return model == "" || model == "auto"
 }
 
+// autoModeEnabled reports whether requests with model "auto" are routed to a
+// provider/model chosen by the selector. Auto-mode is always available; pick a
+// concrete model to bypass it.
 func (h *ProxyHandler) autoModeEnabled() bool {
-	if h == nil || h.Config == nil {
-		return true
-	}
-	autoMode := h.Config.Gateway.AutoMode
-	if autoMode.Enabled {
-		return true
-	}
-	return autoMode.CostWeight == 0 &&
-		autoMode.ConcurrencyWeight == 0 &&
-		autoMode.RecentUsageWeight == 0 &&
-		autoMode.ErrorWeight == 0 &&
-		autoMode.ProviderWeightPenaltyWeight == 0 &&
-		autoMode.RecentWindowSeconds == 0 &&
-		autoMode.DefaultMaxConcurrency == 0 &&
-		autoMode.DefaultOutputTokens == 0
+	return true
 }
 
 func (h *ProxyHandler) selectAutoModel(c *gin.Context, req *types.ChatCompletionRequest) (*service.Selection, func(), error) {
@@ -398,86 +472,21 @@ func (h *ProxyHandler) getTargetURL(c *gin.Context) string {
 	return baseURL + "/" + path
 }
 
-// HandleStreamRequest 处理流式请求
-func (h *ProxyHandler) HandleStreamRequest(c *gin.Context) {
-	// Capture start as early as possible so TTFT reflects the full time the
-	// client waited for the first streamed token.
-	start := time.Now()
-
-	// 设置 SSE 头
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
-	c.Header("Connection", "keep-alive")
-
-	// 解析请求
-	var req types.ChatCompletionRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		h.abortWithError(c, http.StatusBadRequest, "invalid_request_error", fmt.Sprintf("Invalid request: %v", err))
-		return
-	}
-
-	// 获取 provider
-	opts := h.getOptionsFromContext(c)
-	finishSelection := func() {}
-	if isAutoModel(req.Model) {
-		if !h.autoModeEnabled() {
-			h.abortWithError(c, http.StatusBadRequest, "invalid_request_error", "auto mode is disabled")
-			return
-		}
-		selection, done, err := h.selectAutoModel(c, &req)
-		if err != nil {
-			h.abortWithError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
-			return
-		}
-		opts = &selection.Options
-		req.Model = selection.Model
-		finishSelection = done
-	}
-	defer finishSelection()
-
-	prov, err := h.ProviderFactory.Create(opts.Provider, opts)
-	if err != nil {
-		h.abortWithError(c, http.StatusInternalServerError, "provider_error", fmt.Sprintf("Failed to create provider: %v", err))
-		return
-	}
-
-	// 强制设置 stream 为 true
-	req.Stream = true
-	// Inject stream_options.include_usage so OpenAI-compatible upstreams return
-	// a final chunk carrying the `usage` block. Without this, streaming requests
-	// never report token counts and UsageRecordMiddleware records 0 tokens.
-	if req.StreamOptions == nil {
-		req.StreamOptions = &types.StreamOptions{}
-	}
-	req.StreamOptions.IncludeUsage = true
-
-	// 发送请求
-	ctx := c.Request.Context()
-	resp, err := prov.ChatCompletion(ctx, &req, opts)
-	if err != nil {
-		h.abortWithError(c, http.StatusInternalServerError, "request_error", fmt.Sprintf("Request failed: %v", err))
-		return
-	}
-	defer resp.Body.Close()
-
-	// 流式传输响应
-	h.streamResponse(c, resp, &req, opts.Provider, start)
-}
-
-// streamResponse 流式传输响应，同时解析 SSE 事件中的 usage 字段。
-// 当上游在流结束时仍未发送 usage（如 Ollama 的 OpenAI 兼容端点会忽略
-// stream_options.include_usage），则基于累积的输出内容做字符近似估算。
-func (h *ProxyHandler) streamResponse(c *gin.Context, resp *http.Response, req *types.ChatCompletionRequest, providerName string, start time.Time) {
-	// 创建 flusher
+// streamChatResponse 流式转发聊天补全响应：SSE 事件原样透传，同时解析
+// 事件中的 usage（OpenAI/Anthropic/Gemini 形状），把最终 usage 写入上下文
+// 供用量记录计费。上游不发 usage 时基于累积输出做字符近似估算。
+func (h *ProxyHandler) streamChatResponse(c *gin.Context, resp *http.Response, req *types.ChatCompletionRequest, providerName string) {
 	flusher, ok := c.Writer.(http.Flusher)
 	if !ok {
 		h.abortWithError(c, http.StatusInternalServerError, "stream_error", "Streaming not supported")
 		return
 	}
 
-	// StreamUsageKey is the gin context key under which the final usage is stored.
-	// UsageRecordMiddleware reads this after c.Next() returns.
-	const StreamUsageKey = "stream_usage"
+	// 流式请求先设置 SSE 头（状态码沿用上游的）。
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Status(resp.StatusCode)
 
 	// Use bufio.Scanner with a custom split on SSE event boundaries so that
 	// multi-line events and large data chunks aren't split mid-frame.
@@ -524,11 +533,10 @@ func (h *ProxyHandler) streamResponse(c *gin.Context, resp *http.Response, req *
 			if bytes.Equal(payload, []byte("[DONE]")) {
 				continue
 			}
-			// Try to extract a top-level "usage" object from the chunk.
-			// OpenAI sends usage only on the final chunk when
-			// stream_options.include_usage=true.
-			if u := extractUsageFromChunk(payload); u != nil {
-				c.Set(StreamUsageKey, *u)
+			// Try to extract a usage object from the chunk (OpenAI chat chunk
+			// or Anthropic messages event).
+			if u := extractUsageFromEvent(payload); u != nil {
+				c.Set(middleware.StreamUsageKey, *u)
 				sawUsage = true
 			}
 			// 累积 delta.content，用于估算。
@@ -537,7 +545,7 @@ func (h *ProxyHandler) streamResponse(c *gin.Context, resp *http.Response, req *
 					metrics.TimeToFirstToken.WithLabelValues(
 						metrics.LabelOrUnknown(providerName),
 						metrics.LabelOrUnknown(model),
-					).Observe(time.Since(start).Seconds())
+					).Observe(time.Since(startOf(c)).Seconds())
 					ttftRecorded = true
 				}
 				contentBuf.Write(content)
@@ -550,7 +558,7 @@ func (h *ProxyHandler) streamResponse(c *gin.Context, resp *http.Response, req *
 		promptTokens := estimateTokens(promptTextFromRequest(req))
 		completionTokens := estimateTokens(contentBuf.String())
 		if promptTokens > 0 || completionTokens > 0 {
-			c.Set(StreamUsageKey, streamUsage{
+			c.Set(middleware.StreamUsageKey, types.Usage{
 				PromptTokens:     promptTokens,
 				CompletionTokens: completionTokens,
 				TotalTokens:      promptTokens + completionTokens,
@@ -559,26 +567,49 @@ func (h *ProxyHandler) streamResponse(c *gin.Context, resp *http.Response, req *
 	}
 }
 
-// streamUsage carries the token counts extracted from a streaming chunk.
-type streamUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+// startOf reads the request start time stashed by the handler entry.
+func startOf(c *gin.Context) time.Time {
+	if v, ok := c.Get("request_start"); ok {
+		if t, ok := v.(time.Time); ok {
+			return t
+		}
+	}
+	return time.Now()
 }
 
-// extractUsageFromChunk parses a single SSE data payload (JSON) and returns
-// the usage block if present.
-func extractUsageFromChunk(payload []byte) *streamUsage {
+// extractUsageFromEvent parses a single SSE data payload (JSON) and returns
+// the usage block if present. Understands OpenAI chat chunks ("usage") and
+// Anthropic messages events ("message_start" carrying "message.usage").
+func extractUsageFromEvent(payload []byte) *types.Usage {
 	var chunk struct {
-		Usage *streamUsage `json:"usage"`
+		Usage *types.Usage `json:"usage"`
+		// Anthropic: {"type":"message_start","message":{"usage":{...}}}
+		Message *struct {
+			Usage *struct {
+				InputTokens              int `json:"input_tokens"`
+				OutputTokens             int `json:"output_tokens"`
+				CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+				CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+			} `json:"usage"`
+		} `json:"message"`
 	}
 	if err := json.Unmarshal(payload, &chunk); err != nil {
 		return nil
 	}
-	if chunk.Usage == nil {
-		return nil
+	if chunk.Usage != nil {
+		return chunk.Usage
 	}
-	return chunk.Usage
+	if chunk.Message != nil && chunk.Message.Usage != nil {
+		a := chunk.Message.Usage
+		return &types.Usage{
+			PromptTokens:     a.InputTokens,
+			CompletionTokens: a.OutputTokens,
+			TotalTokens:      a.InputTokens + a.OutputTokens,
+			CacheWrite:       a.CacheCreationInputTokens,
+			CacheRead:        a.CacheReadInputTokens,
+		}
+	}
+	return nil
 }
 
 // extractContentDelta extracts the `.delta.content` string from a streaming
@@ -667,7 +698,7 @@ func scanSSEEvents(data []byte, atEOF bool) (advance int, token []byte, err erro
 
 // RegisterRoutes 注册路由
 func (h *ProxyHandler) RegisterRoutes(router *gin.Engine) {
-	// 聊天补全
+	// 聊天补全（流式与非流式统一入口）
 	router.POST("/v1/chat/completions", h.HandleChatCompletion)
 
 	// 文本补全
@@ -689,9 +720,6 @@ func (h *ProxyHandler) RegisterRoutes(router *gin.Engine) {
 
 	// 代理
 	router.Any("/v1/*path", h.ProxyRequest)
-
-	// 流式请求
-	router.POST("/v1/chat/completions/stream", h.HandleStreamRequest)
 }
 
 // HandleImageGeneration 处理图像生成请求

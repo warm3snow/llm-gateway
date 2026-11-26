@@ -14,20 +14,66 @@ import (
 	"github.com/warm3snow/llm-gateway/internal/metrics"
 	"github.com/warm3snow/llm-gateway/internal/models"
 	"github.com/warm3snow/llm-gateway/internal/service"
+	"github.com/warm3snow/llm-gateway/internal/types"
 )
 
 // StreamUsageKey is the gin context key under which the streaming proxy
 // handler stores the final usage block (set by pkg/proxy.streamResponse).
 const StreamUsageKey = "stream_usage"
 
-// streamUsage mirrors the struct used in pkg/proxy. Kept duplicated to avoid
-// an import cycle (pkg/proxy already imports internal/middleware indirectly
-// via the gin context only — but the struct lives here for the middleware's
-// own use).
-type streamUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
+// TriesKey is the gin context key under which the proxy handler stores how
+// many upstream attempts (primary + fallbacks) the request used.
+const TriesKey = "upstream_tries"
+
+// RedactionsKey is the gin context key under which the masking middleware
+// stores how many values it replaced in the request.
+const RedactionsKey = "redactions_count"
+
+func streamUsageToTokens(v any) usageTokens {
+	switch su := v.(type) {
+	case types.Usage:
+		return usageTokens{Input: su.PromptTokens, Output: su.CompletionTokens, Total: su.TotalTokens, CacheRead: su.CacheRead, CacheWrite: su.CacheWrite, Reasoning: su.Reasoning}
+	case *types.Usage:
+		if su == nil {
+			return usageTokens{}
+		}
+		return usageTokens{Input: su.PromptTokens, Output: su.CompletionTokens, Total: su.TotalTokens, CacheRead: su.CacheRead, CacheWrite: su.CacheWrite, Reasoning: su.Reasoning}
+	}
+	return usageTokens{}
+}
+
+func triesFromContext(c *gin.Context) int {
+	if v, ok := c.Get(TriesKey); ok {
+		if n, ok := v.(int); ok && n > 0 {
+			return n
+		}
+	}
+	return 1
+}
+
+func redactionsFromContext(c *gin.Context) int {
+	if v, ok := c.Get(RedactionsKey); ok {
+		if n, ok := v.(int); ok && n > 0 {
+			return n
+		}
+	}
+	return 0
+}
+
+// usageTokens is one call's token counts as the usage middleware needs them.
+// Input and Output exclude cache-read/cache-write prompt tokens; Reasoning is
+// a subset of Output.
+type usageTokens struct {
+	Input      int
+	Output     int
+	Total      int
+	CacheRead  int
+	CacheWrite int
+	Reasoning  int
+}
+
+func (u usageTokens) empty() bool {
+	return u.Input == 0 && u.Output == 0 && u.CacheRead == 0 && u.CacheWrite == 0
 }
 
 var defaultPricingCache = newPricingCache(5*time.Minute, 30*time.Second)
@@ -127,32 +173,25 @@ func UsageRecordMiddlewareWithBudgetTracker(cfg *config.Config, virtualKeyServic
 
 		// Parse tokens: prefer the streaming usage stashed by pkg/proxy,
 		// then fall back to parsing the captured (non-stream) response body.
-		inputTokens, outputTokens := 0, 0
+		tokens := usageTokens{}
 		if u, exists := c.Get(StreamUsageKey); exists {
-			if su, ok := u.(streamUsage); ok {
-				inputTokens = su.PromptTokens
-				outputTokens = su.CompletionTokens
-			} else if suPtr, ok := u.(*streamUsage); ok && suPtr != nil {
-				inputTokens = suPtr.PromptTokens
-				outputTokens = suPtr.CompletionTokens
-			}
+			tokens = streamUsageToTokens(u)
 		}
-		if inputTokens == 0 && outputTokens == 0 {
-			inputTokens, outputTokens = parseUsage(writer.body.Bytes())
+		if tokens.empty() {
+			tokens = parseUsage(writer.body.Bytes())
 		}
 
-		// Detect a cache hit for cost purposes: CacheMiddleware sets the
-		// "x-cache" response header to HIT/MISS. Cache hits are still billable
-		// (at the cache-read rate) and thus still recorded.
+		// Detect a cache hit for metrics purposes: CacheMiddleware sets the
+		// "x-cache" response header to HIT/MISS.
 		cached := c.Writer.Header().Get("x-cache") == "HIT"
 
-		cost := calculateCost(provider, model, inputTokens, outputTokens, cached)
+		cost := calculateCost(provider, model, tokens.Input, tokens.Output, tokens.CacheRead, tokens.CacheWrite)
 
 		// Recording gate: only persist actual model invocations — those that
 		// produced token usage, or failed upstream. Everything else that
 		// merely hit the route (e.g. GET /v1/models) is skipped.
 		status := writer.status
-		if inputTokens == 0 && outputTokens == 0 && status < 400 {
+		if tokens.empty() && status < 400 {
 			recordMiddlewareMetrics()
 			return
 		}
@@ -160,6 +199,7 @@ func UsageRecordMiddlewareWithBudgetTracker(cfg *config.Config, virtualKeyServic
 		// Get virtual key info from context (set by VirtualKeyAuth middleware)
 		var virtualKeyID *uint
 		var virtualKeyName string
+		var virtualKeyUserID *uint
 		var virtualKeyCreatedByUserID *uint
 		var virtualKeyCreatedByUsername string
 		if id, exists := c.Get("virtual_key_id"); exists {
@@ -170,6 +210,11 @@ func UsageRecordMiddlewareWithBudgetTracker(cfg *config.Config, virtualKeyServic
 		if name, exists := c.Get("virtual_key_name"); exists {
 			if n, ok := name.(string); ok {
 				virtualKeyName = n
+			}
+		}
+		if id, exists := c.Get("virtual_key_user_id"); exists {
+			if v, ok := id.(*uint); ok {
+				virtualKeyUserID = v
 			}
 		}
 		if id, exists := c.Get("virtual_key_created_by_user_id"); exists {
@@ -219,6 +264,7 @@ func UsageRecordMiddlewareWithBudgetTracker(cfg *config.Config, virtualKeyServic
 
 		record := models.UsageRecord{
 			TenantID:                    tenantID,
+			UserID:                      virtualKeyUserID,
 			RequestID:                   requestID,
 			VirtualKeyID:                virtualKeyID,
 			VirtualKeyName:              virtualKeyName,
@@ -234,9 +280,15 @@ func UsageRecordMiddlewareWithBudgetTracker(cfg *config.Config, virtualKeyServic
 			ModelInputTruncated:         inputPreview.Truncated,
 			ModelInputBytes:             inputPreview.InputBytes,
 			ModelInputPreviewBytes:      inputPreview.PreviewBytes,
-			InputTokens:                 inputTokens,
-			OutputTokens:                outputTokens,
+			InputTokens:                 tokens.Input,
+			OutputTokens:                tokens.Output,
+			CacheReadTokens:             tokens.CacheRead,
+			CacheWriteTokens:            tokens.CacheWrite,
+			ReasoningTokens:             tokens.Reasoning,
 			Cost:                        cost,
+			LatencyMS:                   time.Since(start).Milliseconds(),
+			Tries:                       triesFromContext(c),
+			Redactions:                  redactionsFromContext(c),
 		}
 
 		// Record real-time Prometheus metrics. Use the route template
@@ -247,7 +299,7 @@ func UsageRecordMiddlewareWithBudgetTracker(cfg *config.Config, virtualKeyServic
 			endpointLabel = "unmatched"
 		}
 		elapsed := time.Since(start)
-		metrics.RecordRequest(provider, model, endpointLabel, status, cached, elapsed.Seconds(), inputTokens, outputTokens, cost)
+		metrics.RecordRequest(provider, model, endpointLabel, status, cached, elapsed.Seconds(), tokens.Input+tokens.CacheRead+tokens.CacheWrite, tokens.Output, cost)
 
 		// Persist asynchronously via the buffered writer. This decouples the
 		// request path from DB latency and bounds goroutine growth under load.
@@ -306,19 +358,98 @@ func extractModelFromBytes(bodyBytes []byte, c *gin.Context) string {
 	return ""
 }
 
-// parseUsage extracts token counts from an OpenAI-compatible response body.
-func parseUsage(body []byte) (inputTokens, outputTokens int) {
+// parseUsage extracts token counts from a response body. It understands the
+// OpenAI Chat Completions shape (including prompt_tokens_details /
+// completion_tokens_details), the Anthropic Messages shape, and the Gemini
+// generateContent shape (usageMetadata). Non-JSON bodies parse as zero.
+func parseUsage(body []byte) usageTokens {
 	var resp struct {
+		// OpenAI chat.completion
 		Usage *struct {
 			PromptTokens     int `json:"prompt_tokens"`
 			CompletionTokens int `json:"completion_tokens"`
 			TotalTokens      int `json:"total_tokens"`
+			PromptDetails    *struct {
+				CachedTokens int `json:"cached_tokens"`
+			} `json:"prompt_tokens_details"`
+			CompletionDetails *struct {
+				ReasoningTokens int `json:"reasoning_tokens"`
+			} `json:"completion_tokens_details"`
 		} `json:"usage"`
+		// Anthropic messages: usage at the top level
+		InputTokens  *int `json:"input_tokens"`
+		OutputTokens *int `json:"output_tokens"`
+		CacheRead    *int `json:"cache_read_input_tokens"`
+		CacheWrite   *int `json:"cache_creation_input_tokens"`
+		// Gemini generateContent: usageMetadata at the top level
+		UsageMetadata *struct {
+			PromptTokenCount        int `json:"promptTokenCount"`
+			CandidatesTokenCount    int `json:"candidatesTokenCount"`
+			TotalTokenCount         int `json:"totalTokenCount"`
+			CachedContentTokenCount int `json:"cachedContentTokenCount"`
+			ThoughtsTokenCount      int `json:"thoughtsTokenCount"`
+		} `json:"usageMetadata"`
 	}
-	if err := json.Unmarshal(body, &resp); err != nil || resp.Usage == nil {
-		return 0, 0
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return usageTokens{}
 	}
-	return resp.Usage.PromptTokens, resp.Usage.CompletionTokens
+
+	if u := resp.Usage; u != nil {
+		var cacheRead, reasoning int
+		if u.PromptDetails != nil {
+			cacheRead = u.PromptDetails.CachedTokens
+		}
+		if u.CompletionDetails != nil {
+			reasoning = u.CompletionDetails.ReasoningTokens
+		}
+		out := usageTokens{
+			Input:     u.PromptTokens,
+			Output:    u.CompletionTokens,
+			Total:     u.TotalTokens,
+			CacheRead: cacheRead,
+			Reasoning: reasoning,
+		}
+		if out.Total == 0 {
+			out.Total = out.Input + out.Output
+		}
+		return out
+	}
+
+	if resp.InputTokens != nil || resp.OutputTokens != nil {
+		in, out := derefInt(resp.InputTokens), derefInt(resp.OutputTokens)
+		return usageTokens{
+			Input:      in,
+			Output:     out,
+			Total:      in + out,
+			CacheRead:  derefInt(resp.CacheRead),
+			CacheWrite: derefInt(resp.CacheWrite),
+		}
+	}
+
+	if resp.UsageMetadata != nil {
+		m := resp.UsageMetadata
+		in := m.PromptTokenCount
+		out := m.CandidatesTokenCount
+		if m.CachedContentTokenCount > 0 && m.CachedContentTokenCount <= in {
+			in -= m.CachedContentTokenCount
+		}
+		return usageTokens{
+			Input:     in,
+			Output:    out,
+			Total:     m.TotalTokenCount,
+			CacheRead: m.CachedContentTokenCount,
+			Reasoning: m.ThoughtsTokenCount,
+		}
+	}
+
+	return usageTokens{}
+}
+
+func derefInt(p *int) int {
+	if p == nil {
+		return 0
+	}
+	return *p
 }
 
 // calculateCost computes cost (USD) for a request using the model_pricings
@@ -344,12 +475,19 @@ func middlewareMetricEndpoint(c *gin.Context) string {
 	return "unknown"
 }
 
-func calculateCost(provider, model string, inputTokens, outputTokens int, cached bool) float64 {
+func calculateCost(provider, model string, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens int) float64 {
 	start := time.Now()
 	result := "success"
 	defer func() {
-		metrics.RecordUsageCostLookup(provider, model, cached, result, time.Since(start))
+		metrics.RecordUsageCostLookup(provider, model, cacheReadTokens > 0, result, time.Since(start))
 	}()
+
+	db := database.GetDB()
+	if db == nil {
+		result = "no_db"
+		return 0
+	}
+	defaultPricingCache.bind(db)
 
 	if mp, ok := defaultPricingCache.get(provider, model); ok {
 		if mp == nil {
@@ -357,15 +495,9 @@ func calculateCost(provider, model string, inputTokens, outputTokens int, cached
 			return 0
 		}
 		result = "cache_hit"
-		return calculateCostFromPricing(mp, inputTokens, outputTokens, cached)
+		return calculateCostFromPricing(mp, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens)
 	}
 
-	db := database.GetDB()
-	if db == nil {
-		result = "no_db"
-		defaultPricingCache.put(provider, model, nil)
-		return 0
-	}
 	mp, err := models.GetModelPricing(db, provider, model)
 	if err != nil {
 		result = "lookup_error"
@@ -378,14 +510,34 @@ func calculateCost(provider, model string, inputTokens, outputTokens int, cached
 	}
 	defaultPricingCache.put(provider, model, mp)
 	result = "loaded"
-	return calculateCostFromPricing(mp, inputTokens, outputTokens, cached)
+	return calculateCostFromPricing(mp, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens)
 }
 
-func calculateCostFromPricing(mp *models.ModelPricing, inputTokens, outputTokens int, cached bool) float64 {
+// calculateCostFromPricing prices a call:
+//
+//	prompt tokens beyond cache reads/writes at InputPrice,
+//	cache-read tokens at CacheReadPrice (InputPrice when unset),
+//	cache-write tokens at CacheWritePrice (InputPrice when unset),
+//	output tokens at OutputPrice.
+//
+// Prices are cents per token; the result is USD.
+func calculateCostFromPricing(mp *models.ModelPricing, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens int) float64 {
 	inputPrice := mp.InputPrice
-	if cached && mp.CacheReadPrice > 0 {
-		inputPrice = mp.CacheReadPrice
+	cacheReadPrice := mp.CacheReadPrice
+	if cacheReadPrice <= 0 {
+		cacheReadPrice = inputPrice
 	}
-	// prices are cents per token; convert to USD
-	return (float64(inputTokens)*inputPrice + float64(outputTokens)*mp.OutputPrice) / 100.0
+	cacheWritePrice := mp.CacheWritePrice
+	if cacheWritePrice <= 0 {
+		cacheWritePrice = inputPrice
+	}
+	plainInput := inputTokens - cacheReadTokens - cacheWriteTokens
+	if plainInput < 0 {
+		plainInput = 0
+	}
+	cost := float64(plainInput)*inputPrice +
+		float64(cacheReadTokens)*cacheReadPrice +
+		float64(cacheWriteTokens)*cacheWritePrice +
+		float64(outputTokens)*mp.OutputPrice
+	return cost / 100.0
 }

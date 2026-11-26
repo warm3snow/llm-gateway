@@ -19,9 +19,8 @@ func TestConfig(t *testing.T) *config.Config {
 			WriteTimeout: 5 * time.Second,
 		},
 		Gateway: config.GatewayConfig{
-			DefaultProvider:    "openai",
-			SupportedProviders: []string{"openai"},
-			MaxRequestTimeout:  5000,
+			DefaultProvider:   "openai",
+			MaxRequestTimeout: 5000,
 			Providers: map[string]types.Options{
 				"openai": {
 					Provider:   "openai",

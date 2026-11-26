@@ -65,6 +65,10 @@ type Options struct {
 	Retry          *RetrySettings         `json:"retry,omitempty" yaml:"retry,omitempty"`
 	OverrideParams map[string]interface{} `json:"overrideParams,omitempty" yaml:"overrideParams,omitempty"`
 	URLToFetch     string                 `json:"urlToFetch,omitempty" yaml:"urlToFetch,omitempty"`
+	// Fallbacks names provider entries tried in order when the primary
+	// provider fails with a retryable status. Each entry must name another
+	// key in the gateway.providers map.
+	Fallbacks []string `json:"fallbacks,omitempty" yaml:"fallbacks,omitempty"`
 
 	// Azure specific
 	ResourceName  string `json:"resourceName,omitempty" yaml:"resourceName,omitempty"`
@@ -236,6 +240,17 @@ type Usage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
+	// CacheRead is the prompt tokens served from the upstream's prompt cache
+	// (OpenAI prompt_tokens_details.cached_tokens; Anthropic
+	// usage.cache_read_input_tokens). Not part of PromptTokens.
+	CacheRead int `json:"cache_read,omitempty"`
+	// CacheWrite is the prompt tokens written to the upstream's prompt cache
+	// (Anthropic usage.cache_creation_input_tokens). Not part of PromptTokens.
+	CacheWrite int `json:"cache_write,omitempty"`
+	// Reasoning is the output tokens the model spent on reasoning
+	// (OpenAI completion_tokens_details.reasoning_tokens). Part of
+	// CompletionTokens.
+	Reasoning int `json:"reasoning,omitempty"`
 }
 
 // StreamResponse 流式响应

@@ -42,6 +42,7 @@ func (h *StatsHandler) RegisterRoutesWithAuth(router *gin.Engine, jwtMiddleware 
 		stats.GET("/overview", h.GetOverview)
 		stats.GET("/analytics", h.GetAnalytics)
 		stats.GET("/hourly", h.GetHourly)
+		stats.GET("/summary", h.GetPeriodSummary)
 	}
 }
 
@@ -171,4 +172,26 @@ func (h *StatsHandler) GetAnalytics(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, data)
+}
+
+// GetPeriodSummary returns a period-window summary (today/7d/30d/all).
+// GET /api/v1/stats/summary?period=7d
+func (h *StatsHandler) GetPeriodSummary(c *gin.Context) {
+	scope, ok := statsAccessScope(c)
+	if !ok {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, types.ErrorResponse{
+			Message: "Missing user scope",
+			Type:    "unauthorized",
+		})
+		return
+	}
+	summary, err := h.service.GetPeriodSummary(scope, c.DefaultQuery("period", "7d"))
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, types.ErrorResponse{
+			Message: "Failed to get period summary",
+			Type:    "internal_error",
+		})
+		return
+	}
+	c.JSON(http.StatusOK, summary)
 }

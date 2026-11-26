@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -25,24 +24,8 @@ func NewHandler(cfg *config.Config) *Handler {
 	return &Handler{Config: cfg, providerSvc: service.NewProviderConfigService()}
 }
 
-// RegisterRoutesWithAuth 注册路由（可传入JWT中间件）
+// RegisterRoutesWithAuth registers admin API routes (JWT-protected when jwtMiddleware is given).
 func (h *Handler) RegisterRoutesWithAuth(router *gin.Engine, jwtMiddleware gin.HandlerFunc) {
-	// 静态文件
-	router.Static("/static", "./web/static")
-
-	// 加载模板（如果不存在则忽略）
-	templates := "web/templates/*"
-	if _, err := os.Stat("web/templates"); err == nil {
-		router.LoadHTMLGlob(templates)
-	}
-
-	// 页面路由
-	router.GET("/admin", h.AdminPage)
-	router.GET("/admin/dashboard", h.DashboardPage)
-	router.GET("/admin/providers", h.ProvidersPage)
-	router.GET("/admin/config", h.ConfigPage)
-
-	// API 路由
 	api := router.Group("/api/v1/admin")
 	if jwtMiddleware != nil {
 		api.Use(jwtMiddleware)
@@ -61,34 +44,6 @@ func (h *Handler) RegisterRoutesWithAuth(router *gin.Engine, jwtMiddleware gin.H
 		// 健康检查
 		api.GET("/health", h.HealthCheck)
 	}
-}
-
-// AdminPage 管理界面主页
-func (h *Handler) AdminPage(c *gin.Context) {
-	c.HTML(http.StatusOK, "admin.html", gin.H{
-		"title": "LLM Gateway - Admin",
-	})
-}
-
-// DashboardPage 仪表盘页面
-func (h *Handler) DashboardPage(c *gin.Context) {
-	c.HTML(http.StatusOK, "dashboard.html", gin.H{
-		"title": "Dashboard - LLM Gateway",
-	})
-}
-
-// ProvidersPage Provider 管理页面
-func (h *Handler) ProvidersPage(c *gin.Context) {
-	c.HTML(http.StatusOK, "providers.html", gin.H{
-		"title": "Providers - LLM Gateway",
-	})
-}
-
-// ConfigPage 配置管理页面
-func (h *Handler) ConfigPage(c *gin.Context) {
-	c.HTML(http.StatusOK, "config.html", gin.H{
-		"title": "Config - LLM Gateway",
-	})
 }
 
 // GetConfig 获取配置
@@ -160,12 +115,22 @@ func (h *Handler) UpdateConfig(c *gin.Context) {
 		return
 	}
 
-	// 更新配置
-	h.Config = &newConfig
+	// 更新配置：保留运行中的 ProvidersMu（其上可能有等待的锁）与 DB 来源的
+	// Providers 映射，仅替换其余配置块。
+	h.Config.Server = newConfig.Server
+	h.Config.Cache = newConfig.Cache
+	h.Config.Budget = newConfig.Budget
+	h.Config.Database = newConfig.Database
+	h.Config.Logging = newConfig.Logging
+	h.Config.Security = newConfig.Security
+	h.Config.Gateway.DefaultProvider = newConfig.Gateway.DefaultProvider
+	h.Config.Gateway.MaxRequestTimeout = newConfig.Gateway.MaxRequestTimeout
+	h.Config.Gateway.GuardrailsEnabled = newConfig.Gateway.GuardrailsEnabled
+	h.Config.Gateway.DefaultConfig = newConfig.Gateway.DefaultConfig
+	h.Config.Gateway.Redact = newConfig.Gateway.Redact
 
 	// 保存到文件
-	configPath := config.GetConfigPath()
-	if err := config.SaveConfig(&newConfig, configPath); err != nil {
+	if err := config.SaveConfig(h.Config, config.GetConfigPath()); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":  fmt.Sprintf("Failed to save config: %v", err),
 			"status": "error",
@@ -176,7 +141,6 @@ func (h *Handler) UpdateConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Config updated successfully",
 		"status":  "success",
-		"data":    newConfig,
 	})
 }
 
@@ -208,15 +172,6 @@ func providerResponse(name string, opts types.Options, enabled bool) ProviderRes
 	}
 }
 
-func (h *Handler) syncProviderInMemory(name string, opts types.Options) {
-	h.Config.Gateway.ProvidersMu.Lock()
-	defer h.Config.Gateway.ProvidersMu.Unlock()
-	if h.Config.Gateway.Providers == nil {
-		h.Config.Gateway.Providers = make(map[string]types.Options)
-	}
-	h.Config.Gateway.Providers[name] = opts
-}
-
 func (h *Handler) providerResponsesFromMemory() []ProviderResponse {
 	h.Config.Gateway.ProvidersMu.RLock()
 	defer h.Config.Gateway.ProvidersMu.RUnlock()
@@ -227,10 +182,21 @@ func (h *Handler) providerResponsesFromMemory() []ProviderResponse {
 	return providers
 }
 
+// syncProviderInMemory adds/updates one provider in the runtime cache the
+// proxy reads; the DB remains the source of truth.
+func (h *Handler) syncProviderInMemory(name string, opts types.Options) {
+	h.Config.Gateway.ProvidersMu.Lock()
+	defer h.Config.Gateway.ProvidersMu.Unlock()
+	if h.Config.Gateway.Providers == nil {
+		h.Config.Gateway.Providers = make(map[string]types.Options)
+	}
+	h.Config.Gateway.Providers[name] = opts
+}
+
 // GetProviders 获取所有 Provider
 // GET /api/v1/admin/providers
 // @Summary Get providers
-// @Description Get all supported providers (whitelist) with their configuration if configured
+// @Description List configured upstream providers (stored in the DB)
 // @Tags admin
 // @Accept json
 // @Produce json
@@ -242,13 +208,6 @@ func (h *Handler) providerResponsesFromMemory() []ProviderResponse {
 func (h *Handler) GetProviders(c *gin.Context) {
 	rows, err := h.providerSvc.List()
 	if err != nil {
-		if errors.Is(err, service.ErrProviderStoreUnavailable) {
-			c.JSON(http.StatusOK, gin.H{
-				"data":   h.providerResponsesFromMemory(),
-				"status": "success",
-			})
-			return
-		}
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":  fmt.Sprintf("Failed to list providers: %v", err),
 			"status": "error",
@@ -437,30 +396,18 @@ func (h *Handler) RemoveProvider(c *gin.Context) {
 	name := c.Param("name")
 
 	if err := h.providerSvc.Delete(name); err != nil {
-		if errors.Is(err, service.ErrProviderStoreUnavailable) {
-			h.Config.Gateway.ProvidersMu.RLock()
-			_, exists := h.Config.Gateway.Providers[name]
-			h.Config.Gateway.ProvidersMu.RUnlock()
-			if !exists {
-				c.JSON(http.StatusNotFound, gin.H{
-					"error":  fmt.Sprintf("Provider '%s' not found", name),
-					"status": "error",
-				})
-				return
-			}
-		} else if errors.Is(err, service.ErrProviderNotFound) {
+		if errors.Is(err, service.ErrProviderNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{
 				"error":  fmt.Sprintf("Provider '%s' not found", name),
 				"status": "error",
 			})
 			return
-		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error":  fmt.Sprintf("Failed to remove provider: %v", err),
-				"status": "error",
-			})
-			return
 		}
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":  fmt.Sprintf("Failed to remove provider: %v", err),
+			"status": "error",
+		})
+		return
 	}
 
 	h.Config.Gateway.ProvidersMu.Lock()

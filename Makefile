@@ -2,13 +2,13 @@
 SHELL := /bin/bash
 BASE_DIR := $(shell pwd)
 FRONTEND_DIR := $(BASE_DIR)/web/frontend
-BACKEND_PORT := 8080
+BACKEND_PORT := 18080
 FRONTEND_PORT := 3000
 DOCKER_CONTEXT_HOST := $(shell docker context inspect --format '{{json .Endpoints.docker.Host}}' 2>/dev/null | tr -d '"')
 TESTCONTAINERS_DOCKER_HOST := $(if $(DOCKER_HOST),$(DOCKER_HOST),$(DOCKER_CONTEXT_HOST))
 TESTCONTAINERS_RYUK := $(if $(TESTCONTAINERS_RYUK_DISABLED),$(TESTCONTAINERS_RYUK_DISABLED),$(if $(filter rancher-desktop,$(shell docker context show 2>/dev/null)),true,false))
 
-.PHONY: all build run dev stop clean test test-unit test-api test-integration test-e2e lint fmt seed-dev seed-demo traffic-demo demo-data load-test load-test-json load-test-stream load-test-soak load-test-capacity-500 load-test-capacity-1000 load-test-capacity-push
+.PHONY: all build run dev stop start start-backend start-frontend restart clean test test-unit test-api test-integration test-e2e lint fmt seed-dev seed-demo traffic-demo demo-data load-test load-test-json load-test-stream load-test-soak load-test-capacity-500 load-test-capacity-1000 load-test-capacity-push
 
 ## 默认目标
 all: build
@@ -50,14 +50,18 @@ dev:
 	@make -j2 run-backend run-frontend
 
 ## 分别后台启动
+## PIDs are written to /tmp so `make stop` can reach the whole process tree
+## (go run spawns a child binary; next dev spawns worker processes).
 start-backend:
 	@echo "==> Starting backend in background..."
-	@$(SHELL) -c 'go run ./cmd/server/ > /tmp/llm-gateway-backend.log 2>&1 & echo "    Backend PID: $$!"'
+	@mkdir -p /tmp/llm-gateway
+	@$(SHELL) -c 'nohup go run ./cmd/server/ > /tmp/llm-gateway-backend.log 2>&1 & echo $$! > /tmp/llm-gateway/backend.pid; echo "    Backend PID: $$(cat /tmp/llm-gateway/backend.pid)"'
 	@echo "    Log: /tmp/llm-gateway-backend.log"
 
 start-frontend:
 	@echo "==> Starting frontend in background..."
-	@$(SHELL) -c 'cd $(FRONTEND_DIR) && npm run dev > /tmp/llm-gateway-frontend.log 2>&1 & echo "    Frontend PID: $$!"'
+	@mkdir -p /tmp/llm-gateway
+	@$(SHELL) -c 'cd $(FRONTEND_DIR) && nohup npm run dev > /tmp/llm-gateway-frontend.log 2>&1 & echo $$! > /tmp/llm-gateway/frontend.pid; echo "    Frontend PID: $$(cat /tmp/llm-gateway/frontend.pid)"'
 	@echo "    Log: /tmp/llm-gateway-frontend.log"
 
 ## 一键后台启动前后端
@@ -84,8 +88,8 @@ restart: stop
 
 stop:
 	@echo "==> Stopping all services..."
-	@lsof -ti:$(BACKEND_PORT) | xargs kill -9 2>/dev/null || true
-	@lsof -ti:$(FRONTEND_PORT) | xargs kill -9 2>/dev/null || true
+	@BACKEND_PORT=$(BACKEND_PORT) FRONTEND_PORTS="$(FRONTEND_PORT) 3001 3002 3003 3004 3005" \
+		$(SHELL) $(BASE_DIR)/scripts/dev-stop.sh
 	@echo "    All services stopped."
 
 ## ============================================================
@@ -252,7 +256,7 @@ help:
 	@echo ""
 	@echo "  运行（后台）:"
 	@echo "    make start           - 后台启动前后端"
-	@echo "    make stop            - 停止所有服务"
+	@echo "    make stop            - 停止所有服务（含 next 子进程，见 scripts/dev-stop.sh）"
 	@echo ""
 	@echo "  其他:"
 	@echo "    make test           - 运行测试"

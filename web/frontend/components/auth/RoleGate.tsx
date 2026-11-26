@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
-import { currentRole } from "@/lib/api";
+import { type ReactNode } from "react";
+import { useRole } from "@/lib/use-session";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ShieldCheck } from "lucide-react";
 
@@ -12,9 +12,13 @@ export function RoleGate({
   allowed: string[];
   children: ReactNode;
 }) {
-  const [role] = useState<string | null>(() => currentRole());
+  const role = useRole();
 
-  if (!role || !allowed.includes(role)) {
+  // Before the session is read, render nothing rather than an "access denied"
+  // flash — the role arrives one tick after mount.
+  if (role === null) return null;
+
+  if (!allowed.includes(role)) {
     return (
       <EmptyState
         title="access denied"

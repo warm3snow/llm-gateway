@@ -27,7 +27,6 @@ func TestPostgresDatabaseMigrateBootstrapAndTenantScope(t *testing.T) {
 		&models.VirtualKey{},
 		&models.UsageRecord{},
 		&models.ProviderConfig{},
-		&models.CacheEntry{},
 		&models.ModelPricing{},
 	))
 	require.NoError(t, database.Bootstrap("root", "rootpass"))

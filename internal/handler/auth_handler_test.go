@@ -105,7 +105,7 @@ func TestLoginSingleTenantReturnsFinalToken(t *testing.T) {
 	user := createAuthTestUser(t, "user1", "secret", "active")
 	createAuthTestMember(t, user.ID, 1, models.RoleTenantAdmin, "active")
 
-	w := postJSON(t, router, "/api/v1/auth/login", gin.H{"username": "user1", "password": "secret"})
+	w := postJSON(t, router, "/api/v1/auth/login", gin.H{"username": user.Email, "password": "secret"})
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
@@ -130,7 +130,7 @@ func TestLoginSingleTenantReturnsFinalToken(t *testing.T) {
 	}
 }
 
-func TestLoginSameUsernameRequiresEmail(t *testing.T) {
+func TestLoginRequiresEmail(t *testing.T) {
 	router, cfg := setupAuthTestRouter(t)
 	createAuthTestTenant(t, 1, "tenant-one")
 	createAuthTestTenant(t, 2, "tenant-two")
@@ -139,11 +139,13 @@ func TestLoginSameUsernameRequiresEmail(t *testing.T) {
 	createAuthTestMember(t, first.ID, 1, models.RoleTenantAdmin, "active")
 	createAuthTestMember(t, second.ID, 2, models.RoleTenantUser, "active")
 
+	// A bare username is no longer a login identity, even when unique.
 	w := postJSON(t, router, "/api/v1/auth/login", gin.H{"username": "user1", "password": "secret-two"})
-	if w.Code != http.StatusConflict {
-		t.Fatalf("expected username conflict, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected bare username to be rejected, got %d: %s", w.Code, w.Body.String())
 	}
 
+	// The email selects exactly one account, regardless of shared usernames.
 	w = postJSON(t, router, "/api/v1/auth/login", gin.H{"username": second.Email, "password": "secret-two"})
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected email login success, got %d: %s", w.Code, w.Body.String())
@@ -174,7 +176,7 @@ func TestLoginMultipleTenantsRequiresSelection(t *testing.T) {
 	createAuthTestMember(t, user.ID, 1, models.RoleTenantAdmin, "active")
 	createAuthTestMember(t, user.ID, 2, models.RoleTenantUser, "active")
 
-	w := postJSON(t, router, "/api/v1/auth/login", gin.H{"username": "user1", "password": "secret"})
+	w := postJSON(t, router, "/api/v1/auth/login", gin.H{"username": user.Email, "password": "secret"})
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}

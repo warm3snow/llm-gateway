@@ -58,7 +58,7 @@ func Bootstrap(adminUser, adminPass string) error {
 		admin := models.User{
 			TenantID:     nil, // super_admin is not bound to a tenant
 			Username:     adminUser,
-			Email:        models.DefaultUserEmail(adminUser, "platform"),
+			Email:        models.NormalizeEmail(adminUser) + "@" + models.EmailDomain,
 			PasswordHash: string(hash),
 			Role:         models.RoleSuperAdmin,
 			Status:       "active",

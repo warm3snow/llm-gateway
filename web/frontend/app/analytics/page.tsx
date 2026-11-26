@@ -1,14 +1,15 @@
 "use client";
 
-import { useAnalytics } from "@/lib/queries";
+import { useAnalytics, usePeriodSummary } from "@/lib/queries";
 import { PageHeader } from "@/components/ui/page-header";
+import { Button } from "@/components/ui/button";
 import { Panel, PanelHeader, PanelTitle, PanelBody } from "@/components/ui/panel";
 import { Badge } from "@/components/ui/badge";
 import { Led } from "@/components/ui/led";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadingBar } from "@/components/ui/loading-bar";
-import { BarChart3, Cpu, Server, DollarSign, Zap } from "lucide-react";
+import { BarChart3, Cpu, Server, DollarSign } from "lucide-react";
 import {
   Bar,
   BarChart,
@@ -23,8 +24,14 @@ import {
 } from "recharts";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
-import { currentRole } from "@/lib/api";
+import { useRole } from "@/lib/use-session";
 import { roleScopeLabel } from "@/components/auth/RoleGate";
+
+function fmtCostVal(n?: number) {
+  if (n == null || n === 0) return "0.0000";
+  if (n < 0.01) return n.toFixed(6);
+  return n.toFixed(4);
+}
 
 const palette = [
   "hsl(var(--primary))",
@@ -36,14 +43,15 @@ const palette = [
 ];
 
 export default function AnalyticsPage() {
-  const [role] = useState<string | null>(() => currentRole());
+  const role = useRole();
+  const [period, setPeriod] = useState<string>("7d");
 
   const { data: stats, isLoading } = useAnalytics();
+  const { data: summary } = usePeriodSummary(period);
 
   const series = stats?.timeSeries ?? [];
   const topModels = stats?.topModels ?? [];
   const topProviders = stats?.topProviders ?? [];
-  const maxCount = stats?.maxCount ?? 1;
 
   // Cost series derived from timeSeries — real spend reported by the backend.
   const costSeries = series.map((p) => ({
@@ -54,10 +62,48 @@ export default function AnalyticsPage() {
   return (
     <div className="scan-in">
       <PageHeader
-        code="05 / analysis"
+        code="02 / analysis"
         title="Analytics"
         description={`Aggregate trends across the gateway · ${roleScopeLabel(role)}`}
+        actions={
+          <div className="flex items-center gap-1">
+            {["today", "7d", "30d", "all"].map((p) => (
+              <Button
+                key={p}
+                variant={period === p ? "default" : "ghost"}
+                size="sm"
+                onClick={() => setPeriod(p)}
+                className="font-mono text-[11px]"
+              >
+                {p}
+              </Button>
+            ))}
+          </div>
+        }
       />
+
+      {/* Period summary strip */}
+      {summary && (
+        <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+          {[
+            { label: "requests", value: summary.totalRequests.toLocaleString() },
+            { label: "errors", value: summary.errors.toLocaleString() },
+            { label: "input tok", value: summary.inputTokens.toLocaleString() },
+            { label: "output tok", value: summary.outputTokens.toLocaleString() },
+            { label: "cache read/write", value: `${summary.cacheReadTokens.toLocaleString()} / ${summary.cacheWriteTokens.toLocaleString()}` },
+            { label: "cost", value: `$${fmtCostVal(summary.cost)}` },
+          ].map((item) => (
+            <div key={item.label} className="rounded-sm border border-border bg-background/40 px-3 py-2.5">
+              <div className="font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground/60">
+                {item.label} · {period}
+              </div>
+              <div className="num mt-1 font-mono text-[16px] text-foreground">
+                {item.value}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {isLoading ? (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -195,7 +241,7 @@ export default function AnalyticsPage() {
               </PanelBody>
             </Panel>
 
-            {/* Top models — horizontal bars */}
+            {/* Top models — horizontal bars, by cost */}
             <Panel>
               <PanelHeader>
                 <div className="flex items-center gap-2">
@@ -203,7 +249,7 @@ export default function AnalyticsPage() {
                   <PanelTitle>top models</PanelTitle>
                 </div>
                 <span className="font-mono text-[10px] text-muted-foreground">
-                  by requests
+                  by cost
                 </span>
               </PanelHeader>
               <PanelBody>
@@ -216,8 +262,9 @@ export default function AnalyticsPage() {
                 ) : (
                   <ul className="space-y-2">
                     {topModels.slice(0, 8).map((m, i) => {
-                      const max = topModels[0]?.count || 1;
-                      const pct = (m.count / max) * 100;
+                      const max = topModels[0]?.cost || topModels[0]?.count || 1;
+                      const value = m.cost ?? m.count ?? 0;
+                      const pct = (value / max) * 100;
                       return (
                         <li key={m.model} className="space-y-1">
                           <div className="flex items-baseline justify-between font-mono text-[11px]">
@@ -228,7 +275,7 @@ export default function AnalyticsPage() {
                               {m.model || "—"}
                             </span>
                             <span className="num text-muted-foreground">
-                              {m.count.toLocaleString()}
+                              ${fmtCostVal(m.cost)} · {m.count.toLocaleString()} req
                             </span>
                           </div>
                           <div className="relative h-1 overflow-hidden rounded-sm bg-secondary">
@@ -252,8 +299,8 @@ export default function AnalyticsPage() {
           </div>
 
           {/* Bottom row: top providers + summary stats */}
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-            <Panel className="lg:col-span-2">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+            <Panel>
               <PanelHeader>
                 <div className="flex items-center gap-2">
                   <Server className="h-3.5 w-3.5 text-primary" />
@@ -308,48 +355,6 @@ export default function AnalyticsPage() {
               </PanelBody>
             </Panel>
 
-            {/* Summary stat strip */}
-            <Panel>
-              <PanelHeader>
-                <div className="flex items-center gap-2">
-                  <Zap className="h-3.5 w-3.5 text-accent" />
-                  <PanelTitle>summary</PanelTitle>
-                </div>
-              </PanelHeader>
-              <PanelBody className="space-y-3 font-mono text-[11px]">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">peak / day</span>
-                  <span className="num text-foreground">{maxCount}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">avg / day</span>
-                  <span className="num text-foreground">
-                    {series.length > 0
-                      ? Math.round(
-                          series.reduce((s, p) => s + p.count, 0) /
-                            series.length
-                        )
-                      : 0}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">distinct models</span>
-                  <span className="num text-accent">
-                    {topModels.length}
-                  </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">distinct providers</span>
-                  <span className="num text-accent">
-                    {topProviders.length}
-                  </span>
-                </div>
-                <div className="flex justify-between border-t border-border pt-3">
-                  <span className="text-muted-foreground">window</span>
-                  <span className="text-foreground">14d</span>
-                </div>
-              </PanelBody>
-            </Panel>
           </div>
         </div>
       )}

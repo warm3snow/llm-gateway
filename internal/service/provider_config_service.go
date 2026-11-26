@@ -175,6 +175,7 @@ func optionsToModel(name string, opts types.Options) (*models.ProviderConfig, er
 		RequestTimeout:     opts.RequestTimeout,
 		Metadata:           opts.Metadata,
 		Index:              opts.Index,
+		Fallbacks:          opts.Fallbacks,
 	}
 	configBytes, err := json.Marshal(extra)
 	if err != nil {
@@ -242,6 +243,7 @@ func modelToOptions(provider *models.ProviderConfig) (types.Options, error) {
 		RequestTimeout:     extra.RequestTimeout,
 		Metadata:           extra.Metadata,
 		Index:              extra.Index,
+		Fallbacks:          extra.Fallbacks,
 	}, nil
 }
 
@@ -261,4 +263,5 @@ type providerExtraConfig struct {
 	RequestTimeout     int                    `json:"requestTimeout,omitempty"`
 	Metadata           map[string]string      `json:"metadata,omitempty"`
 	Index              int                    `json:"index,omitempty"`
+	Fallbacks          []string               `json:"fallbacks,omitempty"`
 }

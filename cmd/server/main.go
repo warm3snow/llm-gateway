@@ -46,6 +46,7 @@ func newRootCmd() *cobra.Command {
 // Called from each subcommand's PreRunE (rather than rootCmd.PersistentPreRunE)
 // so that `--help` and unknown args don't trigger DB connection.
 func persistentLoad() error {
+	config.SetConfigPath(configFile)
 	cfg, err := config.LoadConfig(config.GetConfigPath())
 	if err != nil {
 		log.Printf("Warning: Failed to load config: %v, using defaults", err)

@@ -21,14 +21,8 @@ budget:
     flushTimeout: 5s
 gateway:
     defaultProvider: deterministic
-    providers:
-        deterministic:
-            provider: deterministic
-            requestTimeout: 30000
     guardrailsEnabled: true
     maxRequestTimeout: 120000
-    supportedProviders:
-        - deterministic
 logging:
     level: info
     format: json
@@ -37,8 +31,6 @@ security:
     apiKeyHeader: x-llm-gateway-api-key
     allowedOrigins:
         - '*'
-    rateLimitEnabled: false
-    rateLimit: 100
     adminUser: admin
     adminPass: admin123
     jwtSecret: llm-gateway-benchmark-secret-change-me

@@ -32,7 +32,10 @@ func (h *UserHandler) RegisterRoutesWithAuth(router *gin.Engine, jwtMiddleware g
 		grp.GET("", h.List)
 		grp.POST("", h.Create)
 		grp.PUT("/me/password", h.ChangeOwnPassword)
+		grp.PUT("/:id/quota", h.UpdateQuota)
+		grp.GET("/:id/cost", h.Cost)
 		grp.PUT("/:id/status", h.SetStatus)
+		grp.PUT("/:id/role", h.SetRole)
 	}
 }
 
@@ -115,6 +118,84 @@ func (h *UserHandler) ChangeOwnPassword(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Password updated", "status": "success"})
 }
 
+// UpdateQuota updates a member's monthly quota / rpm limit.
+func (h *UserHandler) UpdateQuota(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, types.ErrorResponse{
+			Message: "Invalid ID",
+			Type:    "invalid_request_error",
+		})
+		return
+	}
+	var req models.UserQuotaRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, types.ErrorResponse{
+			Message: fmt.Sprintf("Invalid request: %v", err),
+			Type:    "invalid_request_error",
+		})
+		return
+	}
+	u, err := h.service.UpdateQuota(currentRole(c), middleware.GetUserTenantID(c), uint(id), &req)
+	if err != nil {
+		status := http.StatusBadRequest
+		if err.Error() == "user not found" {
+			status = http.StatusNotFound
+		} else if err.Error() == "user management privileges required" {
+			status = http.StatusForbidden
+		}
+		c.AbortWithStatusJSON(status, types.ErrorResponse{
+			Message: err.Error(),
+			Type:    "user_error",
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"user": u, "status": "success"})
+}
+
+// Cost returns the member's month-to-date spend broken down by model.
+func (h *UserHandler) Cost(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, types.ErrorResponse{
+			Message: "Invalid ID",
+			Type:    "invalid_request_error",
+		})
+		return
+	}
+	// tenant_admin may only view members of their own tenant.
+	role := currentRole(c)
+	if role == models.RoleTenantAdmin {
+		var member models.TenantMember
+		if err := h.service.DB().Where("user_id = ? AND tenant_id = ?", id, middleware.GetUserTenantID(c)).First(&member).Error; err != nil {
+			c.AbortWithStatusJSON(http.StatusForbidden, types.ErrorResponse{
+				Message: "user not in your tenant",
+				Type:    "authorization_error",
+			})
+			return
+		}
+	}
+	result, err := h.service.UserCost(uint(id))
+	if err != nil {
+		status := http.StatusInternalServerError
+		if err.Error() == "user not found" {
+			status = http.StatusNotFound
+		}
+		c.AbortWithStatusJSON(status, types.ErrorResponse{
+			Message: err.Error(),
+			Type:    "internal_error",
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"status":         "success",
+		"user_id":        result.UserID,
+		"total_requests": result.TotalReq,
+		"total_cost":     result.TotalCost,
+		"items":          result.Items,
+	})
+}
+
 // SetStatus enables/disables a user.
 func (h *UserHandler) SetStatus(c *gin.Context) {
 	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
@@ -149,6 +230,50 @@ func (h *UserHandler) SetStatus(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "User status updated", "status": "success"})
+}
+
+// SetRole changes a tenant member's role (super_admin only).
+func (h *UserHandler) SetRole(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, types.ErrorResponse{
+			Message: "Invalid ID",
+			Type:    "invalid_request_error",
+		})
+		return
+	}
+	var req models.UserRoleRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, types.ErrorResponse{
+			Message: "role is required",
+			Type:    "invalid_request_error",
+		})
+		return
+	}
+	actorID := currentUserID(c)
+	if actorID == nil {
+		c.AbortWithStatusJSON(http.StatusUnauthorized, types.ErrorResponse{
+			Message: "Invalid user token",
+			Type:    "authentication_error",
+		})
+		return
+	}
+	u, err := h.service.SetRole(currentRole(c), *actorID, uint(id), &req)
+	if err != nil {
+		status := http.StatusBadRequest
+		switch err.Error() {
+		case "user not found":
+			status = http.StatusNotFound
+		case "user management privileges required":
+			status = http.StatusForbidden
+		}
+		c.AbortWithStatusJSON(status, types.ErrorResponse{
+			Message: err.Error(),
+			Type:    "user_error",
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"user": u, "status": "success"})
 }
 
 func currentRole(c *gin.Context) string {

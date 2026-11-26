@@ -8,6 +8,57 @@ export interface DashboardStats {
   activeProviders: number;
   activeVirtualKeys: number;
   successRate: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  reasoningTokens?: number;
+  totalRedactions?: number;
+}
+
+export interface ModelPricing {
+  id: number;
+  provider: string;
+  model: string;
+  input_price: number;
+  output_price: number;
+  cache_read_price?: number;
+  cache_write_price?: number;
+  currency: string;
+  source: string;
+  updated_at: string;
+}
+
+export interface PricingResponse {
+  pricings: ModelPricing[];
+}
+
+export interface PricingSyncResponse {
+  status: string;
+  count: number;
+  message: string;
+}
+
+export interface RedactRule {
+  kind: string;
+  prefix?: string;
+  regex?: string;
+}
+
+export interface RedactConfig {
+  enabled: boolean;
+  secrets: boolean;
+  personal: boolean;
+  words?: string[];
+  wordsAnyCase?: boolean;
+  wordsWhole?: boolean;
+  rules?: RedactRule[];
+  kinds?: Record<string, boolean>;
+  actions?: Record<string, string>;
+  allow?: string[];
+}
+
+export interface RedactPreviewResponse {
+  masked: string;
+  enabled: boolean;
 }
 
 export interface Provider {
@@ -49,6 +100,8 @@ export interface AlertEvent {
 export interface VirtualKey {
   id: number;
   tenant_id?: number;
+  user_id?: number; // owning user — cost is attributed to this user
+  user_username?: string;
   created_by_user_id?: number;
   created_by_username?: string;
   name: string;
@@ -69,6 +122,14 @@ export interface Tenant {
   name: string;
   slug: string;
   status: string;
+  // Quota & policy (platform-managed)
+  budget_monthly: number; // USD per calendar month, 0 = unlimited
+  budget_used: number; // month-to-date spend
+  tpm_limit: number; // 0 = unlimited
+  rpm_limit: number; // 0 = unlimited
+  allowed_models: string[]; // empty = all models
+  allow_self_key: boolean; // tenant_user may create own keys
+  budget_reset_at?: string;
   created_at: string;
 }
 
@@ -79,6 +140,11 @@ export interface TenantUser {
   email?: string;
   role: string;
   status: string;
+  // Per-user monthly quota (tenant_admin assigns; sum must fit tenant budget)
+  budget_monthly: number;
+  budget_used: number; // month-to-date spend
+  rpm_limit: number;
+  budget_reset_at?: string;
   created_at: string;
 }
 
@@ -93,6 +159,8 @@ export interface TenantUsersResponse {
 export interface UsageRecord {
   id: number;
   tenant_id?: number;
+  user_id?: number;
+  username?: string;
   request_id: string;
   virtual_key_id?: number;
   virtual_key_name?: string;
@@ -110,7 +178,13 @@ export interface UsageRecord {
   model_input_preview_bytes?: number;
   input_tokens: number;
   output_tokens: number;
+  cache_read_tokens?: number;
+  cache_write_tokens?: number;
+  reasoning_tokens?: number;
   cost: number;
+  latency_ms?: number;
+  tries?: number;
+  redactions?: number;
   created_at: string;
 }
 
@@ -132,6 +206,23 @@ export interface TopItem {
   count: number;
   cost?: number;
   tokens?: number;
+}
+
+export interface PeriodSummary {
+  period: string;
+  since?: string;
+  totalRequests: number;
+  errors: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  reasoningTokens: number;
+  cost: number;
+  totalRedactions: number;
+  series?: TimeSeriesPoint[];
+  topModels?: TopItem[];
+  topProviders?: TopItem[];
 }
 
 export interface AnalyticsData {
@@ -189,6 +280,48 @@ export interface TenantMembership {
   slug: string;
   role: string;
   status: string;
+}
+
+// Cost breakdown row: cost aggregated by user / key / model.
+export interface CostBreakdownItem {
+  user_id?: number;
+  username?: string;
+  virtual_key_id?: number;
+  virtual_key_name?: string;
+  model?: string;
+  provider?: string;
+  requests: number;
+  input_tokens: number;
+  output_tokens: number;
+  cost: number;
+}
+
+export interface TenantCostResponse {
+  tenant_id: number;
+  since?: string;
+  total_requests: number;
+  total_cost: number;
+  items: CostBreakdownItem[];
+}
+
+export interface UserCostResponse {
+  user_id: number;
+  since?: string;
+  total_requests: number;
+  total_cost: number;
+  items: CostBreakdownItem[];
+}
+
+export interface MeUsageResponse {
+  username: string;
+  role: string;
+  budget_monthly: number;
+  budget_used: number;
+  rpm_limit: number;
+  total_requests: number;
+  total_cost: number;
+  input_tokens: number;
+  output_tokens: number;
 }
 
 export type LoginResponse =

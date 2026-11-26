@@ -109,6 +109,66 @@ func TestUserServiceSetStatusRules(t *testing.T) {
 	}
 }
 
+func TestUserServiceSetRoleRules(t *testing.T) {
+	setupTenantTestDB(t)
+	seedTenantUserTestData(t)
+	svc := NewUserService()
+
+	admin, err := svc.Create(models.RoleSuperAdmin, 0, &models.UserRequest{Username: "t1-admin", Password: "secret", TenantID: 1, Role: models.RoleTenantAdmin})
+	if err != nil {
+		t.Fatalf("create tenant admin: %v", err)
+	}
+	member, err := svc.Create(models.RoleSuperAdmin, 0, &models.UserRequest{Username: "t1-member", Password: "secret", TenantID: 1, Role: models.RoleTenantUser})
+	if err != nil {
+		t.Fatalf("create member: %v", err)
+	}
+	otherAdmin, err := svc.Create(models.RoleSuperAdmin, 0, &models.UserRequest{Username: "t2-admin", Password: "secret", TenantID: 2, Role: models.RoleTenantAdmin})
+	if err != nil {
+		t.Fatalf("create second tenant admin: %v", err)
+	}
+
+	if _, err := svc.SetRole(models.RoleTenantAdmin, admin.ID, member.ID, &models.UserRoleRequest{Role: models.RoleTenantAdmin}); err == nil {
+		t.Fatal("tenant_admin must not change roles")
+	}
+	if _, err := svc.SetRole(models.RoleSuperAdmin, admin.ID, member.ID, &models.UserRoleRequest{Role: "super_admin"}); err == nil {
+		t.Fatal("super_admin role must not be assignable")
+	}
+	if _, err := svc.SetRole(models.RoleSuperAdmin, admin.ID, admin.ID, &models.UserRoleRequest{Role: models.RoleTenantUser}); err == nil {
+		t.Fatal("must not change own role")
+	}
+
+	updated, err := svc.SetRole(models.RoleSuperAdmin, 999, member.ID, &models.UserRoleRequest{Role: models.RoleTenantAdmin})
+	if err != nil {
+		t.Fatalf("promote tenant_user to tenant_admin: %v", err)
+	}
+	if updated.Role != models.RoleTenantAdmin {
+		t.Fatalf("expected user role tenant_admin, got %q", updated.Role)
+	}
+
+	// Demoting back is allowed while another active tenant_admin remains.
+	if _, err := svc.SetRole(models.RoleSuperAdmin, 999, member.ID, &models.UserRoleRequest{Role: models.RoleTenantUser}); err != nil {
+		t.Fatalf("demote when another tenant_admin exists: %v", err)
+	}
+
+	// The only remaining tenant_admin cannot be demoted.
+	if _, err := svc.SetRole(models.RoleSuperAdmin, 999, otherAdmin.ID, &models.UserRoleRequest{Role: models.RoleTenantUser}); err == nil {
+		t.Fatal("must not demote the last active tenant_admin")
+	}
+
+	// Tenant hint selects the membership for multi-tenant users.
+	if _, err := svc.SetRole(models.RoleSuperAdmin, 999, member.ID, &models.UserRoleRequest{Role: models.RoleTenantUser, TenantID: 2}); err == nil {
+		t.Fatal("user is not a member of tenant 2")
+	}
+
+	var membership models.TenantMember
+	if err := database.GetDB().Where("user_id = ? AND tenant_id = ?", member.ID, 1).First(&membership).Error; err != nil {
+		t.Fatalf("load membership: %v", err)
+	}
+	if membership.Role != models.RoleTenantUser {
+		t.Fatalf("expected membership role tenant_user, got %q", membership.Role)
+	}
+}
+
 func TestUserServiceChangeOwnPassword(t *testing.T) {
 	setupTenantTestDB(t)
 	seedTenantUserTestData(t)
@@ -150,7 +210,7 @@ func TestUserServiceCreatesIndependentUsersForSameUsernameAcrossTenants(t *testi
 	if first.ID == second.ID {
 		t.Fatalf("expected separate users across tenants, got same id %d", first.ID)
 	}
-	if first.Email != "user1@default.llmgw" || second.Email != "user1@acme.llmgw" {
+	if first.Email != "user1@default.llmgw.org" || second.Email != "user1@acme.llmgw.org" {
 		t.Fatalf("expected tenant-scoped default emails, got %q and %q", first.Email, second.Email)
 	}
 

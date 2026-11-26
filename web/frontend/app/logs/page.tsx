@@ -2,11 +2,13 @@
 
 import { useState } from "react";
 import { useUsage } from "@/lib/queries";
-import { currentRole } from "@/lib/api";
+import { useRole } from "@/lib/use-session";
 import type { UsageRecord } from "@/lib/types";
 import { roleScopeLabel } from "@/components/auth/RoleGate";
 import { PageHeader } from "@/components/ui/page-header";
-import { Panel } from "@/components/ui/panel";
+import { Panel, PanelHeader, PanelBody } from "@/components/ui/panel";
+import { useViewMode } from "@/lib/use-view-mode";
+import { ViewToggle } from "@/components/ui/view-toggle";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -21,7 +23,6 @@ import {
 import {
   Activity,
   Filter,
-  Download,
   RotateCw,
   ChevronLeft,
   ChevronRight,
@@ -68,7 +69,8 @@ export default function LogsPage() {
   const [filter, setFilter] = useState<StatusFilter>("all");
   const [selected, setSelected] = useState<UsageRecord | null>(null);
   const [expanded, setExpanded] = useState(false);
-  const [role] = useState<string | null>(() => currentRole());
+  const role = useRole();
+  const [view, setView] = useViewMode("logs");
 
   const { data, isLoading, refetch, isFetching } = useUsage({
     limit: PAGE_SIZE,
@@ -95,7 +97,7 @@ export default function LogsPage() {
   return (
     <div className="scan-in">
       <PageHeader
-        code="04 / telemetry"
+        code="03 / telemetry"
         title="Request Logs"
         description={`Every proxied request, in order · ${roleScopeLabel(role)}`}
         actions={
@@ -109,16 +111,14 @@ export default function LogsPage() {
               <RotateCw className={cn("h-3.5 w-3.5", isFetching && "animate-spin")} />
               refresh
             </Button>
-            <Button variant="ghost" size="sm" disabled>
-              <Download className="h-3.5 w-3.5" />
-              export
-            </Button>
+
           </div>
         }
       />
 
       {/* Filter rail */}
-      <div className="mb-4 flex items-center gap-2">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <ViewToggle value={view} onChange={setView} className="ml-auto" />
         <div className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground/60">
           <Filter className="h-3 w-3" />
           filter
@@ -147,7 +147,7 @@ export default function LogsPage() {
         </div>
       </div>
 
-      <Panel>
+      <div>
         {isLoading ? (
           <div className="space-y-px">
             {Array.from({ length: 8 }).map((_, i) => (
@@ -166,6 +166,63 @@ export default function LogsPage() {
             className="border-0"
           />
         ) : (
+          view === "cards" ? (
+          <div className="grid grid-cols-1 gap-3 p-3 md:grid-cols-2 xl:grid-cols-3">
+            {logs.map((log) => {
+              const tone = statusTone(log.status_code);
+              return (
+                <Panel key={log.id} className="flex flex-col">
+                  <PanelHeader className="gap-2">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <Badge variant={tone}>{log.status_code}</Badge>
+                      <span className="truncate font-mono text-[12px] text-foreground">
+                        {log.provider} · {log.model || "—"}
+                      </span>
+                    </div>
+                    <span className="shrink-0 font-mono text-[10px] text-muted-foreground/60">
+                      {fmtDate(log.created_at)} {fmtTime(log.created_at)}
+                    </span>
+                  </PanelHeader>
+                  <PanelBody className="flex-1 space-y-2 p-3 font-mono text-[11px]">
+                    <div className="line-clamp-2 text-muted-foreground/80">
+                      {inputSummary(log)}
+                    </div>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-muted-foreground">
+                      <span>vkey: {log.virtual_key_name || "—"}</span>
+                      <span>
+                        tok: <span className="text-foreground">{log.input_tokens}</span>/
+                        <span className="text-muted-foreground">{log.output_tokens}</span>
+                      </span>
+                      <span className="num text-foreground">
+                        ${log.cost?.toFixed(6) ?? "0.000000"}
+                      </span>
+                      {log.latency_ms != null && <span>{log.latency_ms}ms</span>}
+                      {(log.redactions ?? 0) > 0 && (
+                        <Badge variant="warning">masked {log.redactions}</Badge>
+                      )}
+                    </div>
+                  </PanelBody>
+                  <div className="flex items-center justify-between border-t border-border px-3 py-2">
+                    <span className="truncate font-mono text-[9px] uppercase tracking-wider text-muted-foreground/50">
+                      {log.endpoint}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setSelected(log);
+                        setExpanded(false);
+                      }}
+                    >
+                      <Eye className="h-3.5 w-3.5" />
+                      details
+                    </Button>
+                  </div>
+                </Panel>
+              );
+            })}
+          </div>
+          ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[900px] border-collapse">
               <thead>
@@ -180,6 +237,7 @@ export default function LogsPage() {
                     "status",
                     "tokens",
                     "cost",
+                    "meta",
                     "details",
                   ].map((h) => (
                     <th
@@ -248,12 +306,42 @@ export default function LogsPage() {
                           <span className="text-muted-foreground">
                             {log.output_tokens}
                           </span>
+                          {(log.cache_read_tokens ?? 0) > 0 && (
+                            <span
+                              className="ml-1 text-[9px] text-muted-foreground/50"
+                              title="cache read tokens"
+                            >
+                              c:{log.cache_read_tokens}
+                            </span>
+                          )}
+                          {(log.reasoning_tokens ?? 0) > 0 && (
+                            <span
+                              className="ml-1 text-[9px] text-muted-foreground/50"
+                              title="reasoning tokens"
+                            >
+                              r:{log.reasoning_tokens}
+                            </span>
+                          )}
                         </span>
                       </td>
                       <td className="px-4 py-2.5">
                         <span className="num text-foreground">
                           ${log.cost?.toFixed(6) ?? "0.000000"}
                         </span>
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <div className="flex items-center gap-1">
+                          {(log.redactions ?? 0) > 0 && (
+                            <Badge variant="warning" title="masked values">
+                              🔒{log.redactions}
+                            </Badge>
+                          )}
+                          {log.latency_ms != null && (
+                            <span className="text-[9px] text-muted-foreground/50">
+                              {log.latency_ms}ms
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-4 py-2.5">
                         <Button
@@ -274,8 +362,9 @@ export default function LogsPage() {
               </tbody>
             </table>
           </div>
+          )
         )}
-      </Panel>
+      </div>
 
       <Sheet open={!!selected} onOpenChange={(open) => !open && setSelected(null)}>
         <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-2xl">
@@ -300,6 +389,12 @@ export default function LogsPage() {
                   ["endpoint", selected.endpoint],
                   ["input tokens", selected.input_tokens],
                   ["output tokens", selected.output_tokens],
+                  ["cache read", selected.cache_read_tokens ?? 0],
+                  ["cache write", selected.cache_write_tokens ?? 0],
+                  ["reasoning", selected.reasoning_tokens ?? 0],
+                  ["latency", `${selected.latency_ms ?? 0} ms`],
+                  ["tries", selected.tries ?? 1],
+                  ["masked values", selected.redactions ?? 0],
                   ["cost", `$${selected.cost?.toFixed(6) ?? "0.000000"}`],
                   ["input kind", selected.model_input_kind],
                   ["input bytes", selected.model_input_bytes],

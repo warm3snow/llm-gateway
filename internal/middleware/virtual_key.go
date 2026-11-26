@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -54,8 +55,19 @@ func VirtualKeyAuthWithBudgetTracker(cfg *config.Config, budgetTracker *service.
 			metrics.RecordVirtualKeyAuth(middlewareMetricEndpoint(c), metricResult, activeKeysLoaded, time.Since(start))
 		}
 
-		// Read virtual key from the configured header
+		// Read the virtual key from the configured header. Standard clients
+		// speak `Authorization: Bearer <key>` or `x-api-key` (Anthropic); a
+		// Bearer token that matches no JWT is treated as a virtual key so the
+		// gateway works with unmodified OpenAI/Anthropic SDKs.
 		vk := c.GetHeader(headerName)
+		if vk == "" {
+			if auth := c.GetHeader("Authorization"); len(auth) > 7 && (auth[:7] == "Bearer " || auth[:7] == "bearer ") {
+				vk = strings.TrimSpace(auth[7:])
+			}
+		}
+		if vk == "" {
+			vk = c.GetHeader("x-api-key")
+		}
 
 		if vk == "" {
 			metricResult = "missing_key"
@@ -147,26 +159,97 @@ func VirtualKeyAuthWithBudgetTracker(cfg *config.Config, budgetTracker *service.
 		if matchedKey.BudgetTotal > 0 && matchedKey.BudgetUsed+pendingBudget >= matchedKey.BudgetTotal {
 			authCache.evictPositive(cacheDigest)
 			metricResult = "budget_exceeded"
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
-				"error":  "Budget exceeded",
+			c.AbortWithStatusJSON(http.StatusPaymentRequired, gin.H{
+				"error":  "Virtual key budget exceeded",
 				"status": "error",
 			})
 			recordMetric()
 			return
 		}
 
-		// Empty Providers means all providers are allowed. If configured, enforce
-		// against an explicit x-llm-provider immediately. For auto-mode requests
-		// without x-llm-provider, defer enforcement to the model selector so it can
-		// choose from the virtual key's full provider allowlist instead of the
-		// gateway default provider.
+		// Cascade: key → owning user → tenant. Monthly quotas are checked
+		// against month-to-date spend (BudgetUsed) plus pending async cost.
+		quotaSvc := newAuthQuotaService()
+		owner, err := quotaSvc.ResolveUser(matchedKey)
+		if err != nil {
+			metricResult = "owner_error"
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"error":  err.Error(),
+				"status": "error",
+			})
+			recordMetric()
+			return
+		}
+		tenant, err := quotaSvc.ResolveTenant(matchedKey)
+		if err != nil {
+			metricResult = "tenant_error"
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"error":  err.Error(),
+				"status": "error",
+			})
+			recordMetric()
+			return
+		}
+		if tenant != nil && tenant.Status != "active" {
+			metricResult = "tenant_disabled"
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"error":  fmt.Sprintf("Tenant %q is disabled", tenant.Name),
+				"status": "error",
+			})
+			recordMetric()
+			return
+		}
+		if userPending, ok := userPendingCost(matchedKey, owner, pendingBudget); ok {
+			if err := quotaSvc.CheckUserQuota(owner, userPending); err != nil {
+				metricResult = "user_quota_exceeded"
+				c.AbortWithStatusJSON(http.StatusPaymentRequired, gin.H{
+					"error":  "User monthly quota exceeded",
+					"status": "error",
+				})
+				recordMetric()
+				return
+			}
+		}
+		if err := quotaSvc.CheckTenantQuota(tenant, tenantPendingCost(matchedKey, pendingBudget)); err != nil {
+			if errors.Is(err, service.ErrTenantRPMExceeded) {
+				metricResult = "tenant_rpm_limited"
+				c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
+					"error":  "Tenant rpm limit exceeded",
+					"status": "error",
+				})
+			} else {
+				metricResult = "tenant_quota_exceeded"
+				c.AbortWithStatusJSON(http.StatusPaymentRequired, gin.H{
+					"error":  "Tenant monthly budget exceeded",
+					"status": "error",
+				})
+			}
+			recordMetric()
+			return
+		}
+
+		// Read the body once (chat routes) so both the model whitelist and
+		// the deferred provider check can inspect it.
 		requestedProvider := c.GetHeader("x-llm-provider")
 		var requestBody []byte
-		if requestedProvider == "" && isAutoModeChatRoute(c.Request.Method, c.Request.URL.Path) && c.Request.Body != nil {
+		if isAutoModeChatRoute(c.Request.Method, c.Request.URL.Path) && c.Request.Body != nil {
 			if c.Request.ContentLength >= 0 && c.Request.ContentLength <= 1024*1024 {
 				requestBody, _ = io.ReadAll(c.Request.Body)
 				c.Request.Body = io.NopCloser(bytes.NewBuffer(requestBody))
 			}
+		}
+
+		// Tenant model whitelist — deferred for auto-mode requests without an
+		// explicit model, same as the provider check below.
+		requestedModel := requestedModelFromBody(c, requestBody)
+		if err := quotaSvc.CheckModelAllowed(tenant, requestedModel); err != nil {
+			metricResult = "model_not_allowed"
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"error":  "Model is not allowed for this tenant",
+				"status": "error",
+			})
+			recordMetric()
+			return
 		}
 		allowedProviders := providerListFromString(matchedKey.Providers)
 		if len(allowedProviders) > 0 {
@@ -191,6 +274,7 @@ func VirtualKeyAuthWithBudgetTracker(cfg *config.Config, budgetTracker *service.
 		// Set context values for downstream handlers
 		c.Set("virtual_key_id", matchedKey.ID)
 		c.Set("virtual_key_name", matchedKey.Name)
+		c.Set("virtual_key_user_id", matchedKey.UserID)
 		c.Set("virtual_key_created_by_user_id", matchedKey.CreatedByUserID)
 		c.Set("virtual_key_created_by_username", matchedKey.CreatedByUsername)
 		c.Set("tenant_id", matchedKey.TenantID)

@@ -215,6 +215,24 @@ func (t *BudgetTracker) flushBatch(ctx context.Context, updates map[uint]float64
 				return gorm.ErrRecordNotFound
 			}
 		}
+		// Roll the same cost up to the owning users' and tenants' monthly
+		// budgets so cascade checks see near-real-time spend.
+		for id, cost := range updates {
+			var vk models.VirtualKey
+			if err := tx.First(&vk, id).Error; err != nil {
+				return err
+			}
+			if vk.UserID != nil {
+				if err := tx.Model(&models.User{}).Where("id = ?", *vk.UserID).
+					UpdateColumn("budget_used", gorm.Expr("budget_used + ?", cost)).Error; err != nil {
+					return err
+				}
+			}
+			if err := tx.Model(&models.Tenant{}).Where("id = ?", vk.TenantID).
+				UpdateColumn("budget_used", gorm.Expr("budget_used + ?", cost)).Error; err != nil {
+				return err
+			}
+		}
 		return nil
 	}); err != nil {
 		return err

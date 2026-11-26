@@ -20,5 +20,7 @@ func newAPIRouter(t *testing.T, cfg *config.Config) *gin.Engine {
 	jwtMiddleware := middleware.JWTAuth(cfg)
 	handler.NewHandler(cfg).RegisterRoutesWithAuth(router, jwtMiddleware)
 	handler.NewVirtualKeyHandler().RegisterRoutesWithAuth(router, jwtMiddleware)
+	handler.NewTenantHandler().RegisterRoutesWithAuth(router, jwtMiddleware)
+	handler.NewUserHandler().RegisterRoutesWithAuth(router, jwtMiddleware)
 	return router
 }

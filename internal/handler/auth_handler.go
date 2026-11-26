@@ -3,7 +3,6 @@ package handler
 import (
 	"errors"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -172,42 +171,30 @@ func (h *AuthHandler) SelectTenant(c *gin.Context) {
 }
 
 func (h *AuthHandler) authenticateUser(c *gin.Context, identifier, password string) (*models.User, bool) {
-	identifier = strings.TrimSpace(identifier)
-	var candidates []models.User
-	query := database.GetDB().Where("status = ?", "active").Order("id ASC")
-	if strings.Contains(identifier, "@") {
-		query = query.Where("email = ?", strings.ToLower(identifier))
-	} else {
-		query = query.Where("username = ?", identifier)
+	// Accounts are identified by email; a bare username is rejected rather
+	// than resolved, because the same username may exist in many tenants.
+	email := models.NormalizeEmail(identifier)
+	if !models.ValidEmail(email) {
+		h.invalidCredentials(c)
+		return nil, false
 	}
 
-	if err := query.Find(&candidates).Error; err != nil {
+	var user models.User
+	err := database.GetDB().
+		Where("LOWER(email) = ? AND status = ?", email, "active").
+		First(&user).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			h.invalidCredentials(c)
+			return nil, false
+		}
 		c.AbortWithStatusJSON(http.StatusInternalServerError, types.ErrorResponse{
 			Message: "Internal error",
 			Type:    "internal_error",
 		})
 		return nil, false
 	}
-	if len(candidates) == 0 {
-		h.invalidCredentials(c)
-		return nil, false
-	}
-	if !strings.Contains(identifier, "@") && len(candidates) > 1 {
-		c.AbortWithStatusJSON(http.StatusConflict, types.ErrorResponse{
-			Message: "Multiple accounts use this username. Please login with email.",
-			Type:    "authentication_error",
-		})
-		return nil, false
-	}
-	if strings.Contains(identifier, "@") && len(candidates) > 1 {
-		c.AbortWithStatusJSON(http.StatusConflict, types.ErrorResponse{
-			Message: "Multiple accounts use this email. Please contact an administrator.",
-			Type:    "authentication_error",
-		})
-		return nil, false
-	}
 
-	user := candidates[0]
 	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)) != nil {
 		h.invalidCredentials(c)
 		return nil, false

@@ -47,7 +47,9 @@ func (h *TenantHandler) RegisterRoutesWithAuth(router *gin.Engine, jwtMiddleware
 	{
 		grp.GET("", h.List)
 		grp.POST("", h.Create)
+		grp.PUT("/:id", h.Update)
 		grp.PUT("/:id/status", h.SetStatus)
+		grp.GET("/:id/cost", h.Cost)
 		grp.GET("/users", h.ListUsers)
 		grp.POST("/users", h.CreateUser)
 	}
@@ -85,6 +87,79 @@ func (h *TenantHandler) Create(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"tenant": t, "status": "success"})
+}
+
+// Update updates tenant name/quota/policy fields.
+func (h *TenantHandler) Update(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, types.ErrorResponse{
+			Message: "Invalid ID",
+			Type:    "invalid_request_error",
+		})
+		return
+	}
+	var req models.TenantRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, types.ErrorResponse{
+			Message: fmt.Sprintf("Invalid request: %v", err),
+			Type:    "invalid_request_error",
+		})
+		return
+	}
+	t, err := h.service.Update(uint(id), &req)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if err.Error() == "tenant not found" {
+			status = http.StatusNotFound
+		}
+		c.AbortWithStatusJSON(status, types.ErrorResponse{
+			Message: fmt.Sprintf("Failed to update tenant: %v", err),
+			Type:    "update_error",
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"tenant": t, "status": "success"})
+}
+
+// Cost returns the tenant's month-to-date spend broken down by user (by=user)
+// or model (by=model).
+func (h *TenantHandler) Cost(c *gin.Context) {
+	id, err := strconv.ParseUint(c.Param("id"), 10, 32)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, types.ErrorResponse{
+			Message: "Invalid ID",
+			Type:    "invalid_request_error",
+		})
+		return
+	}
+	by := c.DefaultQuery("by", "user")
+	if by != "user" && by != "model" {
+		c.AbortWithStatusJSON(http.StatusBadRequest, types.ErrorResponse{
+			Message: "by must be user or model",
+			Type:    "invalid_request_error",
+		})
+		return
+	}
+	result, err := h.service.Cost(uint(id), by)
+	if err != nil {
+		status := http.StatusInternalServerError
+		if err.Error() == "tenant not found" {
+			status = http.StatusNotFound
+		}
+		c.AbortWithStatusJSON(status, types.ErrorResponse{
+			Message: fmt.Sprintf("Failed to compute tenant cost: %v", err),
+			Type:    "internal_error",
+		})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"status":         "success",
+		"tenant_id":      result.TenantID,
+		"total_requests": result.TotalReq,
+		"total_cost":     result.TotalCost,
+		"items":          result.Items,
+	})
 }
 
 // SetStatus enables/disables a tenant.

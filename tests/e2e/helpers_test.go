@@ -39,10 +39,23 @@ func newMockChatUpstream(t *testing.T, usagePrompt, usageCompletion int) *mockCh
 		require.Equal(t, http.MethodPost, r.Method)
 		require.Equal(t, "/chat/completions", r.URL.Path)
 		var req struct {
-			Model string `json:"model"`
+			Model  string `json:"model"`
+			Stream bool   `json:"stream"`
 		}
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&req))
 		require.NotEmpty(t, req.Model)
+		if req.Stream {
+			// SSE stream in OpenAI chat-chunk shape with a final usage chunk.
+			w.Header().Set("Content-Type", "text/event-stream")
+			chunk := func(payload string) {
+				_, _ = w.Write([]byte("data: " + payload + "\n\n"))
+			}
+			chunk(`{"id":"chatcmpl-e2e","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}`)
+			chunk(`{"id":"chatcmpl-e2e","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"pong"},"finish_reason":null}]}`)
+			chunk(`{"id":"chatcmpl-e2e","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":` + strconv.Itoa(usagePrompt) + `,"completion_tokens":` + strconv.Itoa(usageCompletion) + `,"total_tokens":` + strconv.Itoa(usagePrompt+usageCompletion) + `}}`)
+			_, _ = w.Write([]byte("data: [DONE]\n\n"))
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"id":"chatcmpl-e2e","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"pong"},"finish_reason":"stop"}],"usage":{"prompt_tokens":` + strconv.Itoa(usagePrompt) + `,"completion_tokens":` + strconv.Itoa(usageCompletion) + `,"total_tokens":` + strconv.Itoa(usagePrompt+usageCompletion) + `}}`))
 	}))
@@ -67,6 +80,9 @@ func newGatewayRouterWithCache(t *testing.T, cfg *config.Config, c gatewaycache.
 	handler.NewAuthHandler(cfg).RegisterRoutes(router)
 	jwtMiddleware := middleware.JWTAuth(cfg)
 	handler.NewVirtualKeyHandler().RegisterRoutesWithAuth(router, jwtMiddleware)
+	handler.NewTenantHandler().RegisterRoutesWithAuth(router, jwtMiddleware)
+	handler.NewUserHandler().RegisterRoutesWithAuth(router, jwtMiddleware)
+	handler.NewMeHandler().RegisterRoutesWithAuth(router, jwtMiddleware)
 
 	proxyHandler := proxy.NewProxyHandler(cfg, c)
 	virtualKeyService := service.NewVirtualKeyService()
@@ -75,6 +91,7 @@ func newGatewayRouterWithCache(t *testing.T, cfg *config.Config, c gatewaycache.
 	v1.Use(middleware.UsageRecordMiddleware(cfg, virtualKeyService))
 	v1.Use(middleware.CacheMiddleware(c, time.Minute, cfg.Gateway.DefaultProvider))
 	v1.POST("/chat/completions", proxyHandler.HandleChatCompletion)
+	v1.POST("/messages", proxyHandler.HandleMessages)
 	return router
 }
 
@@ -106,7 +123,7 @@ func seedModelPricing(t *testing.T, provider, model string, inputPrice, outputPr
 func loginAdmin(t *testing.T, router *gin.Engine, cfg *config.Config) string {
 	t.Helper()
 	login := testutil.DoJSON(t, router, http.MethodPost, "/api/v1/auth/login", gin.H{
-		"username": cfg.Security.AdminUser,
+		"username": testutil.AdminEmail(cfg.Security.AdminUser),
 		"password": cfg.Security.AdminPass,
 	})
 	require.Equal(t, http.StatusOK, login.Code, login.Body.String())

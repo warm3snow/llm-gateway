@@ -86,6 +86,8 @@ func NewModelSelector(cfg *config.Config, tracker *ModelConcurrencyTracker) *Mod
 	return &ModelSelector{cfg: cfg, tracker: tracker}
 }
 
+// settings returns the scoring weights used by auto-mode routing, starting
+// from the built-in defaults and applying any configured overrides.
 func (s *ModelSelector) settings() autoModeSettings {
 	settings := autoModeSettings{
 		CostWeight:                  DefaultAutoCostWeight,

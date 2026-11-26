@@ -18,6 +18,7 @@ import (
 type UsageRecord struct {
 	ID                          uint      `gorm:"primaryKey" json:"id"`
 	TenantID                    uint      `gorm:"index;not null;default:1" json:"tenant_id"`
+	UserID                      *uint     `gorm:"index" json:"user_id,omitempty"` // cost attributed to the key's owning user
 	RequestID                   string    `gorm:"size:64;index" json:"request_id"`
 	VirtualKeyID                *uint     `gorm:"index" json:"virtual_key_id,omitempty"`
 	VirtualKeyName              string    `gorm:"size:100" json:"virtual_key_name,omitempty"`
@@ -35,7 +36,13 @@ type UsageRecord struct {
 	ModelInputPreviewBytes      int       `json:"model_input_preview_bytes"`
 	InputTokens                 int       `json:"input_tokens"`
 	OutputTokens                int       `json:"output_tokens"`
+	CacheReadTokens             int       `json:"cache_read_tokens"`
+	CacheWriteTokens            int       `json:"cache_write_tokens"`
+	ReasoningTokens             int       `json:"reasoning_tokens"`
 	Cost                        float64   `gorm:"type:decimal(10,6)" json:"cost"`
+	LatencyMS                   int64     `json:"latency_ms"`
+	Tries                       int       `json:"tries"`
+	Redactions                  int       `json:"redactions"`
 	CreatedAt                   time.Time `gorm:"index" json:"created_at"`
 }
 

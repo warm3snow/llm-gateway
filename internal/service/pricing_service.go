@@ -20,14 +20,18 @@ var portkeyProviderName = map[string]string{
 	"openai":    "openai",
 	"deepseek":  "deepseek",
 	"anthropic": "anthropic",
-	"gemini":    "google", // Portkey uses "google" for Gemini
-	"glm":       "zhipu",  // Portkey uses "zhipu" for GLM
+	"gemini":    "google",   // Portkey uses "google" for Gemini
+	"glm":       "zhipu",    // Portkey uses "zhipu" for GLM
 	"kimi":      "moonshot", // Portkey uses "moonshot" for Kimi
+	"groq":      "groq",
+	"mistral":   "mistralai",
+	"cohere":    "cohere",
+	"ollama":    "ollama",
 }
 
 // AllPortkeyProviders returns the list of supported internal provider names.
 func AllPortkeyProviders() []string {
-	return []string{"openai", "deepseek", "anthropic", "gemini", "glm", "kimi"}
+	return []string{"openai", "deepseek", "anthropic", "gemini", "glm", "kimi", "groq", "mistral", "cohere", "ollama"}
 }
 
 // PricingService fetches and stores model pricing from Portkey.
@@ -50,9 +54,18 @@ func NewPricingService(db *gorm.DB) *PricingService {
 type portkeySchema map[string]struct {
 	PricingConfig struct {
 		PayAsYouGo struct {
-			RequestToken        *struct{ Price float64 `json:"price"` } `json:"request_token"`
-			ResponseToken       *struct{ Price float64 `json:"price"` } `json:"response_token"`
-			CacheReadInputToken *struct{ Price float64 `json:"price"` } `json:"cache_read_input_token"`
+			RequestToken *struct {
+				Price float64 `json:"price"`
+			} `json:"request_token"`
+			ResponseToken *struct {
+				Price float64 `json:"price"`
+			} `json:"response_token"`
+			CacheReadInputToken *struct {
+				Price float64 `json:"price"`
+			} `json:"cache_read_input_token"`
+			CacheWriteInputToken *struct {
+				Price float64 `json:"price"`
+			} `json:"cache_write_input_token"`
 		} `json:"pay_as_you_go"`
 		Currency string `json:"currency"`
 	} `json:"pricing_config"`
@@ -119,7 +132,7 @@ func (s *PricingService) fetchAndStoreOne(provider, portkeyName string, dryRun b
 
 	count := 0
 	for model, cfg := range schema {
-		inputPrice, outputPrice, cacheReadPrice := 0.0, 0.0, 0.0
+		inputPrice, outputPrice, cacheReadPrice, cacheWritePrice := 0.0, 0.0, 0.0, 0.0
 		if cfg.PricingConfig.PayAsYouGo.RequestToken != nil {
 			inputPrice = cfg.PricingConfig.PayAsYouGo.RequestToken.Price
 		}
@@ -128,6 +141,9 @@ func (s *PricingService) fetchAndStoreOne(provider, portkeyName string, dryRun b
 		}
 		if cfg.PricingConfig.PayAsYouGo.CacheReadInputToken != nil {
 			cacheReadPrice = cfg.PricingConfig.PayAsYouGo.CacheReadInputToken.Price
+		}
+		if cfg.PricingConfig.PayAsYouGo.CacheWriteInputToken != nil {
+			cacheWritePrice = cfg.PricingConfig.PayAsYouGo.CacheWriteInputToken.Price
 		}
 		currency := cfg.PricingConfig.Currency
 		if currency == "" {
@@ -147,13 +163,14 @@ func (s *PricingService) fetchAndStoreOne(provider, portkeyName string, dryRun b
 		}
 
 		mp := &models.ModelPricing{
-			Provider:       provider,
-			Model:          model,
-			InputPrice:     inputPrice,
-			OutputPrice:    outputPrice,
-			CacheReadPrice: cacheReadPrice,
-			Currency:       currency,
-			Source:         "portkey",
+			Provider:        provider,
+			Model:           model,
+			InputPrice:      inputPrice,
+			OutputPrice:     outputPrice,
+			CacheReadPrice:  cacheReadPrice,
+			CacheWritePrice: cacheWritePrice,
+			Currency:        currency,
+			Source:          "portkey",
 		}
 		if err := models.UpsertModelPricing(s.db, mp); err != nil {
 			return count, fmt.Errorf("upsert %s/%s: %w", provider, model, err)

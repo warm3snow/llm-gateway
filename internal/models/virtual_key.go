@@ -4,10 +4,12 @@ import (
 	"time"
 )
 
-// VirtualKey represents a virtual key in the system
+// VirtualKey represents a virtual key in the system. Every key is owned by a
+// user (UserID) so cost is attributed per person, in addition to the tenant.
 type VirtualKey struct {
 	ID                uint       `gorm:"primaryKey" json:"id"`
 	TenantID          uint       `gorm:"index;not null;default:1" json:"tenant_id"`
+	UserID            *uint      `gorm:"index" json:"user_id,omitempty"` // owning user — required for cost attribution
 	CreatedByUserID   *uint      `gorm:"index" json:"created_by_user_id,omitempty"`
 	CreatedByUsername string     `gorm:"size:100" json:"created_by_username,omitempty"`
 	Name              string     `gorm:"size:100;not null" json:"name"`
@@ -35,6 +37,7 @@ func (VirtualKey) TableName() string {
 // VirtualKeyRequest is used for API requests
 type VirtualKeyRequest struct {
 	Name            string   `json:"name" binding:"required"`
+	UserID          *uint    `json:"user_id"` // owning user; defaults to the caller
 	BudgetTotal     float64  `json:"budget_total"`
 	RateLimit       *int     `json:"rate_limit"`
 	RateLimitWindow int      `json:"rate_limit_window"`
@@ -46,6 +49,8 @@ type VirtualKeyRequest struct {
 type VirtualKeyResponse struct {
 	ID                uint       `json:"id"`
 	TenantID          uint       `json:"tenant_id"`
+	UserID            *uint      `json:"user_id,omitempty"`
+	UserUsername      string     `json:"user_username,omitempty"`
 	CreatedByUserID   *uint      `json:"created_by_user_id,omitempty"`
 	CreatedByUsername string     `json:"created_by_username,omitempty"`
 	Name              string     `json:"name"`

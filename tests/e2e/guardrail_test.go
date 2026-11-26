@@ -86,7 +86,6 @@ func newGuardrailRouter(t *testing.T, cfg *config.Config, c gatewaycache.Cache) 
 	v1.POST("/chat/completions", proxyHandler.HandleChatCompletion)
 	v1.POST("/completions", proxyHandler.HandleCompletion)
 	v1.POST("/embeddings", proxyHandler.HandleEmbedding)
-	v1.POST("/chat/completions/stream", proxyHandler.HandleStreamRequest)
 	v1.Any("/proxy/*path", proxyHandler.ProxyRequest)
 	return router
 }

@@ -11,6 +11,12 @@ import type {
   UsageStatus,
   TimeSeriesResponse,
   AnalyticsData,
+  PeriodSummary,
+  ModelPricing,
+  PricingResponse,
+  PricingSyncResponse,
+  RedactConfig,
+  RedactPreviewResponse,
   ServerConfig,
   LoginResponse,
   SelectTenantResponse,
@@ -19,6 +25,9 @@ import type {
   Tenant,
   TenantUser,
   TenantMembership,
+  TenantCostResponse,
+  UserCostResponse,
+  MeUsageResponse,
 } from './types';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
@@ -103,9 +112,60 @@ export const api = {
       : '';
     return apiFetch<TimeSeriesResponse>(`/api/v1/stats/hourly${qs ? `?${qs}` : ''}`);
   },
+  getPeriodSummary: (period?: string) =>
+    apiFetch<PeriodSummary>(`/api/v1/stats/summary?period=${period ?? '7d'}`),
   getProviders: () => apiFetch<ProvidersResponse>('/api/v1/admin/providers'),
   getProviderHealth: () => apiFetch<ProviderHealthResponse>('/api/v1/admin/providers/health'),
   getActiveAlerts: () => apiFetch<AlertEventsResponse>('/api/v1/alerts/events?active=true'),
+  getPricing: (provider?: string) => {
+    const qs = provider ? `?provider=${encodeURIComponent(provider)}` : '';
+    return apiFetch<PricingResponse>(`/api/v1/admin/pricing${qs}`);
+  },
+  upsertPricing: (data: {
+    provider: string;
+    model: string;
+    input_price?: number;
+    output_price?: number;
+    cache_read_price?: number;
+    cache_write_price?: number;
+    currency?: string;
+  }) =>
+    apiFetch<{ pricing: ModelPricing }>('/api/v1/admin/pricing', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updatePricing: (id: number, data: {
+    provider: string;
+    model: string;
+    input_price?: number;
+    output_price?: number;
+    cache_read_price?: number;
+    cache_write_price?: number;
+    currency?: string;
+  }) =>
+    apiFetch<{ pricing: ModelPricing }>(`/api/v1/admin/pricing/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  deletePricing: (id: number) =>
+    apiFetch<void>(`/api/v1/admin/pricing/${id}`, { method: 'DELETE' }),
+  syncPricing: (data?: { providers?: string[]; dry_run?: boolean }) =>
+    apiFetch<PricingSyncResponse>('/api/v1/admin/pricing/sync', {
+      method: 'POST',
+      body: JSON.stringify(data ?? {}),
+    }),
+  getRedactConfig: () =>
+    apiFetch<{ data: RedactConfig }>('/api/v1/admin/redact'),
+  updateRedactConfig: (data: RedactConfig) =>
+    apiFetch<{ data: RedactConfig }>('/api/v1/admin/redact', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  previewRedact: (data: { text: string; config?: RedactConfig }) =>
+    apiFetch<RedactPreviewResponse>('/api/v1/admin/redact/preview', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
   getVirtualKeys: () => apiFetch<VirtualKeysResponse>('/api/v1/virtual-keys'),
   getUsage: (params?: {
     limit?: number;
@@ -115,6 +175,7 @@ export const api = {
     status?: UsageStatus;
     status_code?: number;
     tenant_id?: number;
+    user_id?: number;
     start_date?: string;
     end_date?: string;
   }) => {
@@ -160,13 +221,21 @@ export const api = {
     apiFetch<void>(`/api/v1/admin/providers/${encodeURIComponent(name)}`, {
       method: 'DELETE',
     }),
-  createVirtualKey: (data: { name: string; budget_total?: number; rate_limit?: number; rate_limit_window?: number }) =>
+  createVirtualKey: (data: {
+    name: string;
+    user_id?: number; // owning user; defaults to the caller
+    budget_total?: number;
+    rate_limit?: number;
+    rate_limit_window?: number;
+    providers?: string[];
+  }) =>
     apiFetch<VirtualKey>('/api/v1/virtual-keys', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
   updateVirtualKey: (id: string | number, data: {
     name?: string;
+    user_id?: number;
     budget_total?: number;
     rate_limit?: number;
     rate_limit_window?: number;
@@ -182,9 +251,32 @@ export const api = {
     }),
   // Tenant management (super_admin only).
   getTenants: () => apiFetch<TenantsResponse>('/api/v1/tenants'),
-  createTenant: (data: { name: string; slug: string }) =>
+  createTenant: (data: {
+    name: string;
+    slug: string;
+    budget_monthly?: number;
+    tpm_limit?: number;
+    rpm_limit?: number;
+    allowed_models?: string[];
+    allow_self_key?: boolean;
+  }) =>
     apiFetch<{ tenant: Tenant }>('/api/v1/tenants', {
       method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  updateTenant: (
+    id: number,
+    data: {
+      name?: string;
+      budget_monthly?: number;
+      tpm_limit?: number;
+      rpm_limit?: number;
+      allowed_models?: string[];
+      allow_self_key?: boolean;
+    }
+  ) =>
+    apiFetch<{ tenant: Tenant }>(`/api/v1/tenants/${id}`, {
+      method: 'PUT',
       body: JSON.stringify(data),
     }),
   setTenantStatus: (id: number, status: string) =>
@@ -192,41 +284,78 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ status }),
     }),
-  getTenantUsers: (tenantId?: number) =>
-    apiFetch<TenantUsersResponse>(
-      `/api/v1/tenants/users${tenantId ? `?tenant_id=${tenantId}` : ''}`
-    ),
-  createTenantUser: (data: {
-    username: string;
-    email?: string;
-    password: string;
-    tenant_id: number;
-    role?: string;
-  }) =>
-    apiFetch<{ user: TenantUser }>('/api/v1/tenants/users', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
+  getTenantCost: (id: number, params?: { since?: string; by?: string }) => {
+    const qs = new URLSearchParams(
+      Object.entries(params ?? {})
+        .filter(([, v]) => v != null && v !== '')
+        .map(([k, v]) => [k, String(v)])
+    ).toString();
+    return apiFetch<TenantCostResponse>(
+      `/api/v1/tenants/${id}/cost${qs ? `?${qs}` : ''}`
+    );
+  },
   getUsers: (tenantId?: number) =>
     apiFetch<TenantUsersResponse>(
       `/api/v1/users${tenantId ? `?tenant_id=${tenantId}` : ''}`
     ),
   createUser: (data: {
-    username: string;
-    email?: string;
+    // Email is the login identity and must be globally unique; the backend
+    // derives the display username from it when omitted.
+    email: string;
+    username?: string;
     password: string;
     tenant_id?: number;
     role: string;
+    budget_monthly?: number;
+    rpm_limit?: number;
   }) =>
     apiFetch<{ user: TenantUser }>('/api/v1/users', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  updateUserQuota: (
+    id: number,
+    data: { budget_monthly?: number; rpm_limit?: number }
+  ) =>
+    apiFetch<{ user: TenantUser }>(`/api/v1/users/${id}/quota`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  getUserCost: (id: number, params?: { since?: string; by?: string }) => {
+    const qs = new URLSearchParams(
+      Object.entries(params ?? {})
+        .filter(([, v]) => v != null && v !== '')
+        .map(([k, v]) => [k, String(v)])
+    ).toString();
+    return apiFetch<UserCostResponse>(
+      `/api/v1/users/${id}/cost${qs ? `?${qs}` : ''}`
+    );
+  },
   setUserStatus: (id: number, status: string) =>
     apiFetch<void>(`/api/v1/users/${id}/status`, {
       method: 'PUT',
       body: JSON.stringify({ status }),
     }),
+  setUserRole: (id: number, role: string, tenantId?: number) =>
+    apiFetch<{ user: TenantUser }>(`/api/v1/users/${id}/role`, {
+      method: 'PUT',
+      body: JSON.stringify({ role, tenant_id: tenantId }),
+    }),
+  // Self-service endpoints (any authenticated console user).
+  getMeUsage: () => apiFetch<MeUsageResponse>('/api/v1/me/usage'),
+  getMeKeys: () => apiFetch<VirtualKeysResponse>('/api/v1/me/keys'),
+  createMeKey: (data: {
+    name: string;
+    budget_total?: number;
+    rate_limit?: number;
+    rate_limit_window?: number;
+  }) =>
+    apiFetch<VirtualKey>('/api/v1/me/keys', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  deleteMeKey: (id: number) =>
+    apiFetch<void>(`/api/v1/me/keys/${id}`, { method: 'DELETE' }),
 };
 
 // currentRole decodes the (unverified) JWT payload to read the user's role.

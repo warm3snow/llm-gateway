@@ -128,7 +128,6 @@ func migrate() error {
 		&models.VirtualKey{},
 		&models.UsageRecord{},
 		&models.ProviderConfig{},
-		&models.CacheEntry{},
 		&models.ModelPricing{},
 	)
 }
@@ -146,27 +145,31 @@ func initEncryption(cfg *config.Config) error {
 }
 
 func seedProviders(cfg *config.Config, manifest *seedmanifest.Manifest) ([]string, error) {
-	providers := cfg.Gateway.Providers
-	if len(providers) == 0 {
-		providers = map[string]types.Options{
-			"ollama": {
-				Provider:       "ollama",
-				APIKey:         "ollama",
-				CustomHost:     "http://localhost:11434/v1",
-				RequestTimeout: 30000,
-			},
+	// Providers are DB-managed (entered via the admin UI); the seed command
+	// only creates virtual keys for whatever providers already exist.
+	svc := service.NewProviderConfigService()
+	rows, err := svc.List()
+	if err != nil {
+		return nil, fmt.Errorf("list providers: %w", err)
+	}
+	providers := make(map[string]types.Options, len(rows))
+	for i := range rows {
+		opts, err := svc.ToOptions(&rows[i])
+		if err != nil {
+			return nil, fmt.Errorf("decode provider %s: %w", rows[i].Name, err)
 		}
+		providers[rows[i].Name] = opts
 	}
 
-	svc := service.NewProviderConfigService()
+	if len(providers) == 0 {
+		return nil, fmt.Errorf("no providers available; add providers via the admin UI before seeding")
+	}
+
 	names := orderedProviderNames(providers, cfg.Gateway.DefaultProvider)
 	for _, name := range names {
 		opts := providers[name]
 		if strings.TrimSpace(opts.Provider) == "" {
 			opts.Provider = name
-		}
-		if err := svc.Upsert(name, opts); err != nil {
-			return nil, fmt.Errorf("upsert provider %s: %w", name, err)
 		}
 		manifest.Providers = append(manifest.Providers, seedmanifest.ManifestProvider{
 			Name:         name,

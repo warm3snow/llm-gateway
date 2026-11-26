@@ -86,7 +86,8 @@ func TestProxyHandlerChatCompletionReturnsProviderError(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	router.ServeHTTP(w, req)
 
-	require.Equal(t, http.StatusInternalServerError, w.Code)
+	// Upstream failures surface as 502 Bad Gateway.
+	require.Equal(t, http.StatusBadGateway, w.Code)
 	assert.Contains(t, w.Body.String(), "upstream unavailable")
 	assert.Contains(t, w.Body.String(), "request_error")
 }

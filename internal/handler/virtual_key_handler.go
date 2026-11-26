@@ -140,7 +140,7 @@ func (h *VirtualKeyHandler) List(c *gin.Context) {
 			})
 			return
 		}
-		keys, err = h.service.ListByCreator(tenantID, *userID)
+		keys, err = h.service.ListByOwner(tenantID, *userID)
 	} else {
 		keys, err = h.service.List(tenantID)
 	}
@@ -199,7 +199,7 @@ func (h *VirtualKeyHandler) Get(c *gin.Context) {
 			})
 			return
 		}
-		vk, err = h.service.GetByIDAndCreator(tenantID, uint(id), *userID)
+		vk, err = h.service.GetByIDAndOwner(tenantID, uint(id), *userID)
 	} else {
 		vk, err = h.service.GetByID(tenantID, uint(id))
 	}

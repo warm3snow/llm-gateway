@@ -50,9 +50,15 @@ func (s *VirtualKeyService) Create(tenantID uint, req *models.VirtualKeyRequest,
 		rateLimit = *req.RateLimit
 	}
 
-	// Create DB record
+	// Create DB record. The key is owned by req.UserID (validated by the
+	// handler) or by the caller when unspecified.
+	ownerID := createdByUserID
+	if req.UserID != nil {
+		ownerID = req.UserID
+	}
 	vk := &models.VirtualKey{
 		TenantID:          tenantID,
+		UserID:            ownerID,
 		CreatedByUserID:   createdByUserID,
 		CreatedByUsername: createdByUsername,
 		Name:              req.Name,
@@ -141,19 +147,19 @@ func (s *VirtualKeyService) List(tenantID uint) ([]models.VirtualKey, error) {
 	return keys, nil
 }
 
-// ListByCreator returns virtual keys created by a user within a tenant.
-func (s *VirtualKeyService) ListByCreator(tenantID, createdByUserID uint) ([]models.VirtualKey, error) {
+// ListByOwner returns virtual keys owned by a user within a tenant.
+func (s *VirtualKeyService) ListByOwner(tenantID, userID uint) ([]models.VirtualKey, error) {
 	var keys []models.VirtualKey
-	if err := s.db.Scopes(database.TenantScope(tenantID)).Where("created_by_user_id = ?", createdByUserID).Order("created_at DESC").Find(&keys).Error; err != nil {
+	if err := s.db.Scopes(database.TenantScope(tenantID)).Where("user_id = ?", userID).Order("created_at DESC").Find(&keys).Error; err != nil {
 		return nil, err
 	}
 	return keys, nil
 }
 
-// GetByIDAndCreator retrieves a virtual key by ID and creator, scoped to tenantID.
-func (s *VirtualKeyService) GetByIDAndCreator(tenantID, id, createdByUserID uint) (*models.VirtualKey, error) {
+// GetByIDAndOwner retrieves a virtual key by ID owned by a user, scoped to tenantID.
+func (s *VirtualKeyService) GetByIDAndOwner(tenantID, id, userID uint) (*models.VirtualKey, error) {
 	var vk models.VirtualKey
-	if err := s.db.Scopes(database.TenantScope(tenantID)).Where("created_by_user_id = ?", createdByUserID).First(&vk, id).Error; err != nil {
+	if err := s.db.Scopes(database.TenantScope(tenantID)).Where("user_id = ?", userID).First(&vk, id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, errors.New("virtual key not found")
 		}
@@ -190,6 +196,14 @@ func (s *VirtualKeyService) Update(tenantID, id uint, req *models.VirtualKeyRequ
 	if req.Providers != nil {
 		vk.Providers = joinStrings(req.Providers, ",")
 	}
+	if req.UserID != nil {
+		// Validate the new owner exists before reassigning cost attribution.
+		var owner models.User
+		if err := s.db.First(&owner, *req.UserID).Error; err != nil {
+			return nil, fmt.Errorf("owner user not found: %w", err)
+		}
+		vk.UserID = req.UserID
+	}
 
 	if err := s.db.Save(&vk).Error; err != nil {
 		return nil, fmt.Errorf("failed to update virtual key: %w", err)
@@ -210,7 +224,8 @@ func (s *VirtualKeyService) Delete(tenantID, id uint) error {
 	return nil
 }
 
-// TrackUsage updates budget usage for a virtual key
+// TrackUsage updates budget usage for a virtual key and rolls the cost up to
+// the owning user's and tenant's month-to-date budgets.
 func (s *VirtualKeyService) TrackUsage(id uint, cost float64) error {
 	if cost <= 0 {
 		return nil
@@ -218,6 +233,12 @@ func (s *VirtualKeyService) TrackUsage(id uint, cost float64) error {
 	if err := s.db.Model(&models.VirtualKey{}).Where("id = ?", id).
 		UpdateColumn("budget_used", gorm.Expr("budget_used + ?", cost)).Error; err != nil {
 		return fmt.Errorf("failed to track usage: %w", err)
+	}
+	var vk models.VirtualKey
+	if err := s.db.First(&vk, id).Error; err == nil {
+		if err := NewQuotaService().TrackSpend(&vk, cost); err != nil {
+			return fmt.Errorf("failed to track user/tenant spend: %w", err)
+		}
 	}
 	if err := NewAlertService(s.db).CheckVirtualKey(id); err != nil {
 		return fmt.Errorf("failed to check budget alerts: %w", err)
@@ -244,6 +265,13 @@ func (s *VirtualKeyService) ToResponse(vk *models.VirtualKey, fullKey string) *m
 		Status:            vk.Status,
 		CreatedAt:         vk.CreatedAt,
 		UpdatedAt:         vk.UpdatedAt,
+	}
+	resp.UserID = vk.UserID
+	if vk.UserID != nil {
+		var owner models.User
+		if err := s.db.Select("username").First(&owner, *vk.UserID).Error; err == nil {
+			resp.UserUsername = owner.Username
+		}
 	}
 
 	if fullKey != "" {

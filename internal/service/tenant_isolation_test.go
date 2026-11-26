@@ -101,7 +101,7 @@ func TestVirtualKeyCreatorIsolation(t *testing.T) {
 		t.Fatalf("create user two key: %v", err)
 	}
 
-	aliceKeys, err := svc.ListByCreator(1, userOneID)
+	aliceKeys, err := svc.ListByOwner(1, userOneID)
 	if err != nil {
 		t.Fatalf("list alice keys: %v", err)
 	}
@@ -109,7 +109,7 @@ func TestVirtualKeyCreatorIsolation(t *testing.T) {
 		t.Fatalf("alice should see only her user_id-owned key, got %+v", aliceKeys)
 	}
 
-	bobKeys, err := svc.ListByCreator(1, userTwoID)
+	bobKeys, err := svc.ListByOwner(1, userTwoID)
 	if err != nil {
 		t.Fatalf("list bob keys: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestVirtualKeyCreatorIsolation(t *testing.T) {
 		t.Fatalf("bob should see only own key, got %+v", bobKeys)
 	}
 
-	if _, err := svc.GetByIDAndCreator(1, aliceKeys[0].ID, userTwoID); err == nil {
+	if _, err := svc.GetByIDAndOwner(1, aliceKeys[0].ID, userTwoID); err == nil {
 		t.Fatal("bob must not read alice's key by ID")
 	}
 }

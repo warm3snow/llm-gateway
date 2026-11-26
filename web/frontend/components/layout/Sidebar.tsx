@@ -4,7 +4,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
-  MessagesSquare,
   KeyRound,
   Activity,
   BarChart3,
@@ -13,39 +12,21 @@ import {
   TerminalSquare,
   Building2,
   Users,
+  Cpu,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { api, currentRole } from "@/lib/api";
+import { api } from "@/lib/api";
+import { useRole } from "@/lib/use-session";
 import { useStats } from "@/lib/queries";
-import { useState } from "react";
 
+// Navigation is ordered by workflow: observe first, then operate, then
+// administer. Each entry owns a distinct concern so nothing is duplicated.
 const routes = [
   {
     href: "/dashboard",
     label: "Dashboard",
     code: "dash",
     icon: LayoutDashboard,
-    roles: ["super_admin", "tenant_admin", "tenant_user"],
-  },
-  {
-    href: "/providers",
-    label: "Providers",
-    code: "prov",
-    icon: MessagesSquare,
-    roles: ["super_admin", "tenant_admin", "tenant_user"],
-  },
-  {
-    href: "/virtual-keys",
-    label: "Virtual Keys",
-    code: "keys",
-    icon: KeyRound,
-    roles: ["super_admin", "tenant_admin", "tenant_user"],
-  },
-  {
-    href: "/logs",
-    label: "Logs",
-    code: "logs",
-    icon: Activity,
     roles: ["super_admin", "tenant_admin", "tenant_user"],
   },
   {
@@ -56,6 +37,27 @@ const routes = [
     roles: ["super_admin", "tenant_admin", "tenant_user"],
   },
   {
+    href: "/logs",
+    label: "Request Logs",
+    code: "logs",
+    icon: Activity,
+    roles: ["super_admin", "tenant_admin", "tenant_user"],
+  },
+  {
+    href: "/virtual-keys",
+    label: "API Keys",
+    code: "keys",
+    icon: KeyRound,
+    roles: ["super_admin", "tenant_admin", "tenant_user"],
+  },
+  {
+    href: "/providers",
+    label: "Models",
+    code: "modl",
+    icon: Cpu,
+    roles: ["super_admin"],
+  },
+  {
     href: "/tenants",
     label: "Tenants",
     code: "tnnt",
@@ -64,7 +66,7 @@ const routes = [
   },
   {
     href: "/users",
-    label: "Users",
+    label: "Members",
     code: "user",
     icon: Users,
     roles: ["super_admin", "tenant_admin"],
@@ -81,8 +83,9 @@ const routes = [
 export default function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
 
-  // Role is read client-side from the JWT (UI gating only).
-  const [role] = useState<string | null>(() => currentRole());
+  // Role is read client-side from the JWT (UI gating only). It resolves
+  // after mount so the server and client render the same placeholder markup.
+  const role = useRole();
   const navRoutes = routes.filter((route) => role && route.roles.includes(role));
 
   // Live gateway status derived from the stats query — green when the API

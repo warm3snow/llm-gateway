@@ -1,3 +1,44 @@
+# LLM Gateway configuration.
+# Providers are managed in the database (admin console → Model Management),
+# not here. Only infrastructure-level settings live in this file.
+
+server:
+    host: 0.0.0.0
+    port: 18080
+    readTimeout: 1m0s
+    writeTimeout: 1m0s
+    shutdownTimeout: 30s
+    mode: debug
+    pprofEnabled: false
+
+gateway:
+    # Fallback provider for requests that do not name one. Provider and model
+    # catalogues are stored in the database.
+    defaultProvider: ollama
+    guardrailsEnabled: true
+    maxRequestTimeout: 120000
+    # Sensitive-value masking for /v1 requests: values go upstream as stable
+    # placeholders and are restored in the response. Editable from Settings.
+    redact:
+        enabled: false
+        secrets: true
+        personal: false
+        wordsAnyCase: false
+        wordsWhole: false
+        words: []
+        rules: []
+        kinds: {}
+        actions: {}
+        allow: []
+
+database:
+    driver: sqlite
+    dsn: llm-gateway.db
+    logLevel: warn
+    maxOpenConns: 50
+    maxIdleConns: 25
+    connMaxLifetime: 30m0s
+
 cache:
     enabled: false
     type: memory
@@ -6,55 +47,23 @@ cache:
         addr: localhost:6379
         password: ""
         db: 0
-gateway:
-    defaultProvider: ollama
-    providers:
-        deepseek:
-            provider: deepseek
-            apiKey: admin123
-            weight: 1
-            customHost: https://api.deepseek.com/v1
-            requestTimeout: 30000
-        ollama:
-            provider: ollama
-            apiKey: o1lama
-            customHost: http://localhost:11434/v1
-            requestTimeout: 30000
-    guardrailsEnabled: true
-    maxRequestTimeout: 120000
-    supportedProviders:
-        - ollama
-database:
-    driver: sqlite
-    dsn: llm-gateway.db
-    logLevel: warn
-    maxOpenConns: 50
-    maxIdleConns: 25
-    connMaxLifetime: 30m0s
+
 budget:
     asyncEnabled: true
     queueSize: 10000
     batchSize: 500
     flushInterval: 250ms
     flushTimeout: 5s
+
 logging:
     level: info
     format: json
     outputPath: stdout
+
 security:
     apiKeyHeader: x-llm-gateway-api-key
     allowedOrigins:
         - '*'
-    rateLimitEnabled: false
-    rateLimit: 100
     adminUser: admin
     adminPass: admin123
     jwtSecret: llm-gateway-secret-change-in-production
-server:
-    host: 0.0.0.0
-    port: 8080
-    readTimeout: 1m0s
-    writeTimeout: 1m0s
-    shutdownTimeout: 30s
-    mode: debug
-    pprofEnabled: false
