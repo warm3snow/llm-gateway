@@ -156,21 +156,21 @@ db-reset:
 ## 数据生成
 ## ============================================================
 
-## 生成开发数据（dev + demo 两个 profile，含默认 ollama provider）
+## 生成开发数据（用户/租户/provider/密钥，含默认 ollama provider）并调用网关生成流量
 seed:
-	@echo "==> Seeding local data (dev + demo)..."
-	go run ./cmd/seed --profile dev
-	go run ./cmd/seed --profile demo
+	@echo "==> Seeding local data (tenants, users, ollama provider, virtual keys)..."
+	go run ./cmd/seed
+	@echo "==> Generating demo traffic through the gateway..."
+	go run ./cmd/generate-traffic --provider "$${PROVIDER:-ollama}" --model "$${MODEL:-qwen2.5:7b}" --requests $${REQUESTS:-20} --concurrency $${CONCURRENCY:-2}
 	@echo "    Done. Default provider: ollama, default model: $${MODEL:-qwen2.5:7b}"
 
 traffic-demo:
 	@echo "==> Generating demo traffic..."
-	go run ./cmd/generate-traffic --profile demo --provider "$${PROVIDER:-ollama}" --model "$${MODEL:-qwen2.5:7b}" --requests $${REQUESTS:-20} --concurrency $${CONCURRENCY:-2}
+	go run ./cmd/generate-traffic --provider "$${PROVIDER:-ollama}" --model "$${MODEL:-qwen2.5:7b}" --requests $${REQUESTS:-20} --concurrency $${CONCURRENCY:-2}
 
 load-test:
 	@echo "==> Running load test..."
 	go run ./cmd/generate-traffic \
-		--profile $${PROFILE:-demo} \
 		--provider $${PROVIDER:-} \
 		--model $${MODEL:-} \
 		--scenario $${SCENARIO:-baseline-nonstream} \
@@ -187,7 +187,6 @@ load-test:
 load-test-json:
 	@echo "==> Running load test with JSON output..."
 	go run ./cmd/generate-traffic \
-		--profile $${PROFILE:-demo} \
 		--provider $${PROVIDER:-} \
 		--model $${MODEL:-} \
 		--scenario $${SCENARIO:-baseline-nonstream} \
@@ -217,7 +216,7 @@ load-test-capacity-1000:
 load-test-capacity-push:
 	@$(MAKE) load-test PROVIDER=deterministic MODEL=deterministic-chat SCENARIO=baseline-nonstream DURATION=$${DURATION:-5m} WARMUP=$${WARMUP:-30s} CONCURRENCY=$${CONCURRENCY:-5000} RPS=$${RPS:-5000} P95_THRESHOLD=0s
 
-demo-data: seed traffic-demo
+demo-data: seed
 
 ## ============================================================
 ## 安装依赖
@@ -264,8 +263,8 @@ help:
 	@echo "    make clean          - 清理构建产物"
 	@echo "    make deps           - 安装所有依赖"
 	@echo "    make db-reset      - 重置数据库"
-	@echo "    make seed           - 生成 dev + demo seed 数据（自动创建 ollama provider）"
-	@echo "    make traffic-demo   - 基于 demo manifest 生成真实代理流量"
+	@echo "    make seed           - 生成 seed 数据（用户/租户/provider/密钥）并调用网关生成流量"
+	@echo "    make traffic-demo   - 基于 seed manifest 生成真实代理流量"
 	@echo "    make load-test      - 运行生产化压测场景"
 	@echo "    make load-test-json - 运行压测并输出 JSON 报告"
 	@echo "    make load-test-stream - 运行流式 TTFT 压测"
@@ -273,5 +272,5 @@ help:
 	@echo "    make load-test-capacity-500 - 500 RPS / 500 concurrency / p95 < 100ms"
 	@echo "    make load-test-capacity-1000 - 1000 RPS / 1000 concurrency / p95 < 200ms"
 	@echo "    make load-test-capacity-push - 逐步推到 5000 RPS 查瓶颈"
-	@echo "    make demo-data      - 生成 seed 数据并生成 demo 流量"
+	@echo "    make demo-data      - 同 make seed（生成数据 + 流量）"
 	@echo ""

@@ -48,8 +48,8 @@ type ManifestKey struct {
 	Providers []string `json:"providers"`
 }
 
-func DefaultManifestPath(profile string) string {
-	return filepath.Join(".tmp", "seed", profile+"-manifest.json")
+func DefaultManifestPath() string {
+	return filepath.Join(".tmp", "seed", "manifest.json")
 }
 
 func SaveManifest(path string, manifest *Manifest) error {

@@ -8,9 +8,9 @@
 
 LLM Gateway is a **unified API gateway** for multiple LLM providers (OpenAI, Anthropic, Gemini, etc.). It provides a single OpenAI-compatible API endpoint that routes requests to configured providers with support for:
 
-- Virtual key management (budget tracking, rate limiting)
-- Response caching (memory + Redis)
-- JWT-based admin authentication
+- Virtual key management (budget/quota tracking)
+- Response caching (memory + Redis) and idempotency-key replay
+- JWT-based admin authentication with tenants, users, and roles
 - Next.js admin dashboard
 
 **Module path:** `github.com/warm3snow/llm-gateway`
@@ -21,31 +21,38 @@ LLM Gateway is a **unified API gateway** for multiple LLM providers (OpenAI, Ant
 
 ```
 llm-gateway/
-├── cmd/server/main.go          # Application entrypoint
+├── cmd/
+│   ├── server/               # Application entrypoint (serve.go) and route registration
+│   └── generate-traffic/     # Demo traffic generation and load-test scenarios
 ├── internal/
-│   ├── config/              # Viper-based config loading
+│   ├── config/              # Viper-based config loading (env overrides: LLM_GATEWAY_*)
 │   ├── database/            # GORM database layer (SQLite/PostgreSQL)
-│   ├── handler/             # Gin HTTP handlers (auth, stats, usage, virtual keys)
-│   ├── middleware/          # Gin middleware (logger, recovery, CORS, JWT, virtual key auth, cache, usage record)
-│   ├── models/              # GORM models (VirtualKey, UsageRecord, ProviderConfig, CacheEntry, ModelPricing)
-│   ├── provider/            # LLM provider implementations (OpenAI, Anthropic, Gemini, etc.)
-│   ├── routing/             # Request routing (load-balance, fallback, conditional)
-│   ├── service/             # Business logic (stats, usage, virtual keys)
+│   ├── handler/             # Gin HTTP handlers (auth, stats, usage, virtual keys, tenants, users, me, pricing, redact)
+│   ├── logstore/            # Usage-record storage
+│   ├── metrics/             # Prometheus metrics
+│   ├── middleware/          # Gin middleware (logger, recovery, CORS, JWT, virtual key auth + quota, redact, guardrail, idempotency, cache, usage record)
+│   ├── models/              # GORM models (Tenant, User, VirtualKey, UsageRecord, ProviderConfig, ModelPricing, AlertRule, ...)
+│   ├── provider/            # LLM provider implementations (OpenAI, Anthropic, Gemini, Azure, DeepSeek, Groq, Mistral, Kimi, GLM, Cohere, Ollama, etc.)
+│   ├── seed/                # Seed manifest types
+│   ├── service/             # Business logic (stats, usage, virtual keys, model selector, quotas, alerts, provider health, redact registry)
 │   └── types/               # Shared type definitions
 ├── pkg/
 │   ├── cache/               # Cache interface + memory/Redis implementations
-│   ├── encryption/         # AES-256-GCM encryption for API keys
-│   ├── guard-rail/          # Request/response guardrail framework
-│   ├── proxy/               # Core proxy handler (HTTP request forwarding)
+│   ├── encryption/         # AES-256-GCM encryption for API keys at rest
+│   ├── guardrail/          # Request/response guardrail framework
+│   ├── proxy/               # Core proxy handler (fallback chain, auto model selection)
+│   ├── redact/              # Privacy masking engine
 │   └── retry/               # Retry logic with backoff
 ├── web/frontend/           # Next.js 14+ admin dashboard (App Router)
-│   ├── app/                 # Pages (dashboard, providers, virtual-keys, logs, analytics, settings)
+│   ├── app/                 # Pages: dashboard, analytics, logs, virtual-keys, providers, tenants, users, settings
 │   ├── components/          # React components (ui/, layout/, providers/)
 │   └── lib/                # API client (api.ts), utilities
-├── configs/config.yaml       # Runtime configuration (YAML)
+├── configs/config.yaml       # Runtime configuration (YAML, infrastructure settings only)
 ├── Makefile                 # Build, run, test, deploy commands
 └── .gitignore              # Ignores binaries, .next/, node_modules/, etc.
 ```
+
+**Providers live in the database, not in config.yaml.** They are created/edited from the admin console (Providers page). `configs/config.yaml` only holds infrastructure settings (`server`, `gateway`, `database`, `cache`, `budget`, `logging`, `security`).
 
 ---
 
@@ -56,12 +63,16 @@ llm-gateway/
 ```
 Client Request
   → Gin Middleware Stack (logger → recovery → CORS → [JWT Auth for /api/v1/*] → [VirtualKeyAuth for /v1/*])
+  → /v1/* pipeline: Redact → Guardrail → Idempotency → Usage Record → Cache
+  → Model Selection (auto mode) or Provider Entry
+  → Fallback Chain (pkg/proxy, per-provider retry settings)
   → Proxy Handler (pkg/proxy)
-  → Routing Engine (internal/routing)
   → Provider Adapter (internal/provider/{name})
   → Upstream LLM API
   → Response (with optional caching via CacheMiddleware)
 ```
+
+Routing is implemented in `pkg/proxy` (fallback chain) and `internal/service/model_selector.go` (auto model selection). Requests with `model: "auto"` are scored on cost, inflight concurrency, recent usage, and error rate.
 
 ### Provider Interface (`internal/provider/provider.go`)
 
@@ -100,9 +111,10 @@ func (h *StatsHandler) RegisterRoutesWithAuth(router, jwtMiddleware) { ... }
 
 ### Configuration (`internal/config/config.go`)
 
-- Loaded via **Viper** from `configs/config.yaml`
+- Loaded via **Viper** from `configs/config.yaml` (path overridable via `LLM_GATEWAY_CONFIG_PATH`)
 - Supports environment variable overrides: `LLM_GATEWAY_SERVER_PORT=9090`
-- Key config blocks: `server`, `gateway`, `database`, `cache`, `logging`, `security`
+- Key config blocks: `server`, `gateway`, `database`, `cache`, `budget`, `logging`, `security`
+- Local dev backend port is **18080** (see `BACKEND_PORT` in the Makefile and `web/frontend/.env.local`); Docker uses 8080
 
 ---
 
@@ -112,16 +124,16 @@ func (h *StatsHandler) RegisterRoutesWithAuth(router, jwtMiddleware) { ... }
 
 1. Create service in `internal/service/{name}_service.go`
 2. Create handler in `internal/handler/{name}_handler.go`
-3. Register routes in `cmd/server/main.go` (apply `jwtMiddleware` for admin routes)
+3. Register routes in `cmd/server/serve.go` (apply `jwtMiddleware` for admin routes)
 4. Update frontend `web/frontend/lib/api.ts` with new API function
 5. Create/Update frontend page in `web/frontend/app/{page}/page.tsx`
 
 ### Add a New LLM Provider
 
-1. Create `internal/provider/{name}/{name}.go`
-2. Implement the `Provider` interface
-3. Register in `internal/provider/provider.go` factory
-4. Register the provider row in the database (admin console → Model Management) — `configs/config.yaml` no longer lists providers
+1. Create `internal/provider/{name}/{name}.go` implementing the `Provider` interface
+2. Register it via `provider.RegisterGlobalProvider(...)` in an `init()` function
+3. Add a blank import `_ "github.com/warm3snow/llm-gateway/internal/provider/{name}"` in `cmd/server/serve.go`
+4. Register the provider row in the database (admin console → Providers) — `configs/config.yaml` does not list providers
 
 ### Add a New Frontend Page
 
@@ -169,18 +181,22 @@ func (h *StatsHandler) RegisterRoutesWithAuth(router, jwtMiddleware) { ... }
 | `make start` | Start backend + frontend in background; logs to `/tmp/llm-gateway-*.log` |
 | `make stop` | Stop backend + frontend, including Next.js child workers (`scripts/dev-stop.sh`) |
 | `make restart` | `stop` + `start` |
-| `make build` | Build Go binary + Next.js static export |
-| `make test` | Run all Go tests |
+| `make build` | Build Go binary + frontend build |
+| `make test` | Run Go unit tests (`test-unit`); also `test-api`, `test-integration`, `test-e2e`, `test-coverage` |
+| `make lint` | `golangci-lint run ./...` |
 | `make clean` | Remove `bin/`, `llm-gateway.db`, `.next/` |
 | `make deps` | `go mod tidy` + `npm install` |
+| `make seed` | Seed data (tenants, users, ollama provider, virtual keys) and generate traffic through the gateway |
+| `make traffic-demo` | Generate demo traffic through the gateway |
+| `make load-test` | Run load-test scenarios (see `docs/benchmarking.md`) |
 | `make help` | Show all available commands |
 
 ---
 
 ## Environment Setup
 
-1. **Backend:** Go 1.21+; copy `configs/config.yaml` and set env vars for API keys
-2. **Frontend:** Node.js 18+; `cd web/frontend && npm install`
+1. **Backend:** Go 1.21+; `configs/config.yaml` holds infrastructure settings (provider keys go in the DB, not here)
+2. **Frontend:** Node.js 18+; `cd web/frontend && npm install`. `web/frontend/.env.local` sets `NEXT_PUBLIC_API_URL` (default `http://localhost:18080`)
 3. **Database:** SQLite (default, auto-created as `llm-gateway.db`); PostgreSQL supported via `database.driver: "postgres"`
 4. **Default admin login:** `admin@llmgw.org`, password `admin123` (change via `security.adminUser` / `security.adminPass` in config)
 
@@ -190,12 +206,13 @@ func (h *StatsHandler) RegisterRoutesWithAuth(router, jwtMiddleware) { ... }
 
 | File | Purpose |
 |---|---|
-| `cmd/server/main.go` | App entrypoint, route registration |
+| `cmd/server/serve.go` | App entrypoint, route registration |
 | `internal/handler/handler.go` | Admin handlers (config, providers) |
 | `internal/handler/auth_handler.go` | JWT login endpoint |
 | `internal/middleware/jwt.go` | JWT auth middleware |
 | `internal/provider/provider.go` | Provider factory + interface |
-| `internal/routing/strategy.go` | Routing engine (load-balance, fallback, conditional) |
+| `pkg/proxy/proxy.go` | Proxy handler (fallback chain, auto model selection) |
+| `internal/service/model_selector.go` | Auto model scoring/selection |
 | `internal/models/virtual_key.go` | VirtualKey GORM model |
 | `web/frontend/lib/api.ts` | Frontend API client (MUST match backend JSON field names) |
 | `web/frontend/app/dashboard/page.tsx` | Dashboard page |

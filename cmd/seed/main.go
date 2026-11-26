@@ -36,7 +36,6 @@ const (
 )
 
 type seedOptions struct {
-	Profile              string
 	ConfigPath           string
 	ManifestPath         string
 	BaseURL              string
@@ -45,7 +44,6 @@ type seedOptions struct {
 
 func main() {
 	opts := seedOptions{}
-	flag.StringVar(&opts.Profile, "profile", "demo", "seed profile: dev or demo (both run by default)")
 	flag.StringVar(&opts.ConfigPath, "config", "", "path to config.yaml")
 	flag.StringVar(&opts.ManifestPath, "manifest", "", "manifest output path")
 	flag.StringVar(&opts.BaseURL, "base-url", "", "gateway base URL written to the manifest")
@@ -59,12 +57,8 @@ func main() {
 }
 
 func run(opts seedOptions) error {
-	profile := strings.TrimSpace(opts.Profile)
-	if profile == "" {
-		profile = "demo"
-	}
 	if opts.ManifestPath == "" {
-		opts.ManifestPath = seedmanifest.DefaultManifestPath(profile)
+		opts.ManifestPath = seedmanifest.DefaultManifestPath()
 	}
 	if opts.VirtualKeysPerTenant <= 0 {
 		return fmt.Errorf("virtual-keys-per-tenant must be > 0")
@@ -100,7 +94,7 @@ func run(opts seedOptions) error {
 	}
 
 	manifest := &seedmanifest.Manifest{
-		Profile:         profile,
+		Profile:         "demo",
 		BaseURL:         baseURL(opts.BaseURL, cfg),
 		DefaultProvider: cfg.Gateway.DefaultProvider,
 	}
@@ -112,15 +106,15 @@ func run(opts seedOptions) error {
 	if err := seedPricing(providerNames); err != nil {
 		return err
 	}
-	if err := seedTenantsUsersAndKeys(profile, providerNames, manifest, opts.VirtualKeysPerTenant); err != nil {
+	if err := seedTenantsUsersAndKeys(providerNames, manifest, opts.VirtualKeysPerTenant); err != nil {
 		return err
 	}
 	if err := seedmanifest.SaveManifest(opts.ManifestPath, manifest); err != nil {
 		return err
 	}
 
-	log.Printf("seeded profile=%s tenants=%d users=%d providers=%d virtual_keys=%d manifest=%s",
-		profile, len(manifest.Tenants), len(manifest.Users), len(manifest.Providers), len(manifest.VirtualKeys), opts.ManifestPath)
+	log.Printf("seeded tenants=%d users=%d providers=%d virtual_keys=%d manifest=%s",
+		len(manifest.Tenants), len(manifest.Users), len(manifest.Providers), len(manifest.VirtualKeys), opts.ManifestPath)
 	return nil
 }
 
@@ -274,18 +268,15 @@ func seedPricing(providerNames []string) error {
 	return nil
 }
 
-func seedTenantsUsersAndKeys(profile string, providerNames []string, manifest *seedmanifest.Manifest, virtualKeysPerTenant int) error {
+func seedTenantsUsersAndKeys(providerNames []string, manifest *seedmanifest.Manifest, virtualKeysPerTenant int) error {
 	db := database.GetDB()
 	tenantCount := 2
-	if profile == "dev" {
-		tenantCount = 1
-	}
 
 	for i := 1; i <= tenantCount; i++ {
-		slug := fmt.Sprintf("seed-%s-tenant-%d", profile, i)
+		slug := fmt.Sprintf("seed-tenant-%d", i)
 		tenant := models.Tenant{Slug: slug}
 		if err := db.Where("slug = ?", slug).
-			Assign(models.Tenant{Name: fmt.Sprintf("Seed %s Tenant %d", profile, i), Status: "active"}).
+			Assign(models.Tenant{Name: fmt.Sprintf("Seed Tenant %d", i), Status: "active"}).
 			FirstOrCreate(&tenant).Error; err != nil {
 			return fmt.Errorf("upsert tenant %s: %w", slug, err)
 		}
@@ -309,7 +300,7 @@ func seedTenantsUsersAndKeys(profile string, providerNames []string, manifest *s
 		)
 
 		for keyIndex := 1; keyIndex <= virtualKeysPerTenant; keyIndex++ {
-			key, vk, err := upsertVirtualKey(db, profile, tenant, admin, providerNames, keyIndex)
+			key, vk, err := upsertVirtualKey(db, tenant, admin, providerNames, keyIndex)
 			if err != nil {
 				return err
 			}
@@ -398,8 +389,8 @@ func upsertUser(db *gorm.DB, tenant models.Tenant, username, password, role stri
 	return &user, nil
 }
 
-func upsertVirtualKey(db *gorm.DB, profile string, tenant models.Tenant, user *models.User, providerNames []string, index int) (string, *models.VirtualKey, error) {
-	name := fmt.Sprintf("seed-%s-key-%s", profile, tenant.Slug)
+func upsertVirtualKey(db *gorm.DB, tenant models.Tenant, user *models.User, providerNames []string, index int) (string, *models.VirtualKey, error) {
+	name := fmt.Sprintf("seed-key-%s", tenant.Slug)
 	if index > 1 {
 		name = fmt.Sprintf("%s-%d", name, index)
 	}
@@ -414,6 +405,7 @@ func upsertVirtualKey(db *gorm.DB, profile string, tenant models.Tenant, user *m
 	vk := models.VirtualKey{}
 	attrs := models.VirtualKey{
 		TenantID:          tenant.ID,
+		UserID:            &user.ID,
 		CreatedByUserID:   &user.ID,
 		CreatedByUsername: user.Username,
 		Name:              name,
@@ -425,7 +417,7 @@ func upsertVirtualKey(db *gorm.DB, profile string, tenant models.Tenant, user *m
 		RateLimitWindow:   60,
 		Providers:         strings.Join(providerNames, ","),
 		Status:            "active",
-		Metadata:          fmt.Sprintf(`{"seed_profile":"%s","tenant":"%s"}`, profile, tenant.Slug),
+		Metadata:          fmt.Sprintf(`{"seeded":true,"tenant":"%s"}`, tenant.Slug),
 	}
 	if err := db.Where("tenant_id = ? AND name = ?", tenant.ID, name).First(&vk).Error; err != nil {
 		if err != gorm.ErrRecordNotFound {

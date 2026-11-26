@@ -13,7 +13,7 @@ docker compose up -d postgres redis
 Seed benchmark data and start the gateway:
 
 ```bash
-LLM_GATEWAY_CONFIG_PATH=configs/benchmark.yaml go run ./cmd/seed --profile demo --base-url http://localhost:8080 --virtual-keys-per-tenant 1000
+LLM_GATEWAY_CONFIG_PATH=configs/benchmark.yaml go run ./cmd/seed --base-url http://localhost:8080 --virtual-keys-per-tenant 1000
 LLM_GATEWAY_CONFIG_PATH=configs/benchmark.yaml go run ./cmd/server
 ```
 

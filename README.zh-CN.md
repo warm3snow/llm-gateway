@@ -13,7 +13,7 @@ LLM Gateway 是一个用 Go 构建的统一 LLM API 网关：用一套 OpenAI-co
 
 - 用 `/v1/chat/completions` 等 OpenAI-compatible 接口统一调用不同 provider
 - 给业务方发放虚拟密钥，并按 key 统计用量、预算和请求记录
-- 在多个 provider / model 之间做负载均衡、故障转移和条件路由
+- 在多个 provider / model 之间做故障转移和 auto 模型自动选择
 - 开启内存或 Redis 缓存，降低重复请求成本
 - 通过 Next.js 管理后台维护 provider、虚拟密钥、租户、用户、告警和统计报表
 
@@ -27,37 +27,35 @@ LLM Gateway 是一个用 Go 构建的统一 LLM API 网关：用一套 OpenAI-co
 make deps
 ```
 
-### 2. 配置 provider
-
-默认配置文件在 `configs/config.yaml`。本地调试默认指向 Ollama：
-
-```yaml
-gateway:
-  defaultProvider: ollama
-  providers:
-    ollama:
-      provider: ollama
-      customHost: http://localhost:11434/v1
-```
-
-如果使用云端 provider，按需替换 `provider`、`apiKey` 和 `customHost`。
-
-### 3. 启动服务
+### 2. 构建并启动
 
 ```bash
-make dev
-```
-
-- 后端 API：`http://localhost:8080`
-- 前端控制台：`http://localhost:3000`
-- 默认管理员：`admin@llmgw.org / admin123`（生产环境请修改）
-
-也可以后台启动：
-
-```bash
+make build
 make start
-# 停止
+```
+
+- 后端 API：`http://localhost:18080`
+- 前端控制台：`http://localhost:3000`
+- 日志：`/tmp/llm-gateway-backend.log` 和 `/tmp/llm-gateway-frontend.log`
+
+停止服务：
+
+```bash
 make stop
+```
+
+> Docker 部署（`docker compose up`）时网关暴露在 `http://localhost:8080`，并附带 Postgres 与 Redis。
+
+### 3. 登录并添加 provider
+
+打开控制台，使用默认管理员账号登录（`admin@llmgw.org / admin123`，生产环境请修改）。
+
+Provider 存放在数据库中（在管理后台 → Providers 页面维护），不写在 `config.yaml` 里。在 Providers 页面添加 provider，按需填写 `apiKey` 和 `customHost`——本地 Ollama 填 `http://localhost:11434/v1`。同时在页面中补充 model 价格，用量统计才能计算成本。
+
+也可以一键生成 seed 数据（租户、用户、虚拟密钥、演示流量）：
+
+```bash
+make seed
 ```
 
 ### 4. 创建虚拟密钥并调用
@@ -65,14 +63,16 @@ make stop
 登录控制台创建 Virtual Key 后，用它调用 OpenAI-compatible API：
 
 ```bash
-curl -X POST http://localhost:8080/v1/chat/completions \
+curl -X POST http://localhost:18080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "x-llm-gateway-api-key: your-virtual-key" \
   -d '{
-    "model": "llama3",
+    "model": "qwen2.5:7b",
     "messages": [{"role": "user", "content": "Hello!"}]
   }'
 ```
+
+把 `model` 设为 `"auto"`（或省略）可让网关按成本、并发与近期用量自动选择 provider/model。
 
 ## 架构设计图
 
@@ -83,18 +83,22 @@ curl -X POST http://localhost:8080/v1/chat/completions \
 ```text
 Client
   -> /v1/*
-  -> Virtual Key Auth
-  -> Guardrail / Idempotency / Usage Record / Cache
+  -> Virtual Key Auth（含 key → 用户 → 租户配额级联）
+  -> Redact / Guardrail / Idempotency / Usage Record / Cache
+  -> 模型选择（auto 模式）或 Provider 配置
+  -> Fallback 链（每个 provider 独立重试配置）
   -> Proxy Handler
-  -> Routing Engine
   -> Provider Adapter
   -> Upstream LLM API
 ```
 
+`model: "auto"` 的请求会在所有启用的 provider/model 组合上打分（成本、在途并发、近期用量、错误率），胜出者通过 `x-llm-selected-*` 响应头返回。Provider 条目可以配置 `fallbacks`：主 provider 返回可重试错误时按顺序尝试备选。
+
 ## API 文档
 
 - [API Reference](docs/api.md)（英文）
-- OpenAI-compatible API 使用 `x-llm-gateway-api-key` 虚拟密钥认证
+- OpenAI-compatible 接口：`/v1/chat/completions`、`/v1/completions`、`/v1/embeddings`、`/v1/models`、`/v1/images/generations`、`/v1/audio/*`、`/v1/messages`（Anthropic-compatible），以及通用代理 `/v1/proxy/*path`
+- OpenAI-compatible API 使用 `x-llm-gateway-api-key` 虚拟密钥认证（也支持 `Authorization: Bearer <virtual-key>` 和 `x-api-key`）
 - Admin API 使用 `Authorization: Bearer <token>` JWT 认证
 
 ## 核心能力
@@ -102,12 +106,14 @@ Client
 | 能力 | 说明 |
 |---|---|
 | 多 Provider | 内置 OpenAI、Anthropic、Gemini、Azure、DeepSeek、Groq、Mistral、Kimi、GLM、Cohere、Ollama 等适配器 |
-| 统一协议 | 对外提供 OpenAI-compatible API，减少业务侧适配成本 |
-| 虚拟密钥 | 使用网关密钥隔离真实 provider key，支持预算和用量跟踪 |
-| 路由策略 | 支持单 provider、负载均衡、故障转移、条件路由 |
-| 缓存 | 支持内存缓存和 Redis 缓存 |
-| 多租户 | 支持租户、用户、角色和租户级数据隔离 |
-| 可观测性 | 提供请求日志、用量记录、统计分析和 Prometheus metrics |
+| 统一协议 | 对外提供 OpenAI-compatible API，含 SSE 流式与 Anthropic 风格的 `/v1/messages` |
+| 虚拟密钥 | 使用网关密钥隔离真实 provider key，可限制可用 provider/model，按 key 统计用量与预算 |
+| 配额级联 | 月度配额沿 key → 用户 → 租户逐级校验，预算异步记账 |
+| 路由 | Fallback 链 + 每个 provider 独立重试配置；auto 模式按成本/并发/错误率自动选型 |
+| 缓存 | 支持内存缓存和 Redis 缓存，并支持 Idempotency-Key 响应重放 |
+| 隐私脱敏 | 请求/响应中的敏感值用稳定占位符掩码，可在 Settings 中配置 |
+| 多租户 | 支持租户、用户、角色（super_admin / tenant_admin / member）和租户级数据隔离 |
+| 可观测性 | 提供请求日志、用量记录、统计分析、provider 健康检查和 Prometheus metrics |
 
 ## 常用命令
 
@@ -116,37 +122,50 @@ Client
 | `make deps` | 安装后端和前端依赖 |
 | `make dev` | 前台启动后端和前端 |
 | `make start` | 后台启动后端和前端 |
+| `make restart` | 停止并重新启动本地服务 |
 | `make stop` | 停止本地服务 |
 | `make build` | 构建后端二进制和前端产物 |
 | `make test` | 运行 Go 单元测试 |
+| `make lint` | 运行 Go 代码检查（`golangci-lint`） |
 | `make fmt` | 格式化 Go 代码 |
-| `make seed` | 生成 dev + demo 数据（自动创建 ollama provider） |
+| `make seed` | 生成 seed 数据（租户、用户、ollama provider、虚拟密钥）并调用网关生成流量 |
 | `make traffic-demo` | 生成演示流量 |
-| `make load-test` | 运行压测场景 |
+| `make load-test` | 运行压测场景（另有 `-json`、`-stream`、`-soak` 与容量目标命令） |
 
 ## 项目结构
 
 ```text
 llm-gateway/
-├── cmd/server/              # 服务入口与路由注册
+├── cmd/
+│   ├── server/              # 服务入口与路由注册
+│   └── generate-traffic/    # 演示流量与压测场景
 ├── internal/
-│   ├── config/              # 配置加载
-│   ├── database/            # GORM 数据库层
-│   ├── handler/             # HTTP handlers
-│   ├── middleware/          # Gin middleware
+│   ├── config/              # Viper 配置加载（环境变量前缀 LLM_GATEWAY_*）
+│   ├── database/            # GORM 数据库层（SQLite/PostgreSQL）
+│   ├── handler/             # HTTP handlers（auth、stats、usage、virtual keys、tenants、users 等）
+│   ├── logstore/            # 用量记录存储
+│   ├── metrics/             # Prometheus 指标
+│   ├── middleware/          # Gin middleware（认证、配额、脱敏、护栏、缓存、幂等等）
 │   ├── models/              # 数据模型
 │   ├── provider/            # LLM provider adapters
-│   ├── routing/             # 路由策略
-│   └── service/             # 业务服务
+│   ├── seed/                # seed manifest 类型
+│   ├── service/             # 业务服务（模型选择、配额、告警等）
+│   └── types/               # 共享类型定义
 ├── pkg/
 │   ├── cache/               # Memory / Redis cache
-│   ├── guard-rail/          # 请求 / 响应护栏
-│   ├── proxy/               # 核心代理逻辑
+│   ├── encryption/          # 静态密钥 AES-256-GCM 加密
+│   ├── guardrail/           # 请求 / 响应护栏
+│   ├── proxy/               # 核心代理逻辑（fallback 链、auto 模型选择）
+│   ├── redact/              # 隐私脱敏引擎
 │   └── retry/               # 重试机制
 ├── web/frontend/            # Next.js 管理后台
-├── configs/config.yaml      # 默认配置
+│   └── app/                 # 页面：dashboard、analytics、logs、virtual-keys、providers、tenants、users、settings
+├── configs/config.yaml      # 默认配置（仅基础设施配置）
+├── docs/                    # API 参考与压测手册
 └── Makefile                 # 本地开发命令
 ```
+
+Provider 不在 `config.yaml` 中配置——它们存放在数据库里，通过管理后台维护。配置文件只保留基础设施设置（server、database、cache、budget、logging、security）。
 
 ## 开源协作
 
@@ -156,8 +175,6 @@ llm-gateway/
 make test
 make fmt
 ```
-
-如果新增 provider、路由策略或管理接口，请同步更新相关文档和测试。
 
 ## 安全
 

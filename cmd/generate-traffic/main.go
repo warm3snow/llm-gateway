@@ -35,7 +35,6 @@ var prompts = []string{
 }
 
 type options struct {
-	Profile         string        `json:"profile"`
 	ManifestPath    string        `json:"manifest_path"`
 	BaseURL         string        `json:"base_url"`
 	Provider        string        `json:"provider"`
@@ -113,8 +112,7 @@ type summary struct {
 
 func main() {
 	opts := options{}
-	flag.StringVar(&opts.Profile, "profile", "demo", "seed profile used to resolve the default manifest path")
-	flag.StringVar(&opts.ManifestPath, "manifest", "", "seed manifest path")
+	flag.StringVar(&opts.ManifestPath, "manifest", "", "seed manifest path (default .tmp/seed/manifest.json)")
 	flag.StringVar(&opts.BaseURL, "base-url", "", "gateway base URL override")
 	flag.StringVar(&opts.Provider, "provider", "", "provider name to route through")
 	flag.StringVar(&opts.Model, "model", "", "chat model to use; auto-detected from /v1/models when empty")
@@ -218,7 +216,7 @@ func run(opts options) error {
 		return fmt.Errorf("rps must be >= 0")
 	}
 	if opts.ManifestPath == "" {
-		opts.ManifestPath = seedmanifest.DefaultManifestPath(opts.Profile)
+		opts.ManifestPath = seedmanifest.DefaultManifestPath()
 	}
 	if opts.Output == "" {
 		opts.Output = "text"

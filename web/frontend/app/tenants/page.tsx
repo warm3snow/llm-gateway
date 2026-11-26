@@ -9,6 +9,7 @@ import {
   useCreateTenant,
   useUpdateTenant,
   useSetTenantStatus,
+  usePricing,
 } from "@/lib/queries";
 import type { Tenant, TenantCostResponse } from "@/lib/types";
 import { PageHeader } from "@/components/ui/page-header";
@@ -22,6 +23,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Switch } from "@/components/ui/switch";
 import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuCheckboxItem,
+} from "@/components/ui/dropdown-menu";
+import {
   Sheet,
   SheetContent,
   SheetHeader,
@@ -34,14 +41,14 @@ import { RoleGate } from "@/components/auth/RoleGate";
 import { useViewMode } from "@/lib/use-view-mode";
 import { ViewToggle } from "@/components/ui/view-toggle";
 import { toast } from "sonner";
-import { Building2, Plus, UserPlus, Power, Pencil, Wallet, Loader2 } from "lucide-react";
+import { Building2, Plus, UserPlus, Power, Pencil, Wallet, Loader2, ChevronDown } from "lucide-react";
 
 type TenantDraft = {
   name: string;
   slug: string;
   budget_monthly: string;
   rpm_limit: string;
-  allowed_models: string;
+  allowed_models: string[];
   allow_self_key: boolean;
 };
 
@@ -50,7 +57,7 @@ const emptyDraft: TenantDraft = {
   slug: "",
   budget_monthly: "",
   rpm_limit: "",
-  allowed_models: "",
+  allowed_models: [],
   allow_self_key: false,
 };
 
@@ -60,9 +67,15 @@ function draftFromTenant(t: Tenant): TenantDraft {
     slug: t.slug,
     budget_monthly: t.budget_monthly ? String(t.budget_monthly) : "",
     rpm_limit: t.rpm_limit ? String(t.rpm_limit) : "",
-    allowed_models: (t.allowed_models ?? []).join(","),
+    allowed_models: t.allowed_models ?? [],
     allow_self_key: t.allow_self_key,
   };
+}
+
+function toggleModel(models: string[], model: string): string[] {
+  return models.includes(model)
+    ? models.filter((m) => m !== model)
+    : [...models, model];
 }
 
 function fmtUSD(n: number) {
@@ -81,6 +94,10 @@ export default function TenantsPage() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Tenant | null>(null);
   const [draft, setDraft] = useState<TenantDraft>(emptyDraft);
+  const { data: pricings } = usePricing();
+  const availableModels = Array.from(
+    new Set((pricings ?? []).map((p) => p.model))
+  ).sort();
 
   // cost sheet
   const [costTenant, setCostTenant] = useState<Tenant | null>(null);
@@ -104,10 +121,7 @@ export default function TenantsPage() {
       slug: draft.slug.trim(),
       budget_monthly: Number(draft.budget_monthly) || 0,
       rpm_limit: Number(draft.rpm_limit) || 0,
-      allowed_models: draft.allowed_models
-        .split(",")
-        .map((s) => s.trim())
-        .filter(Boolean),
+      allowed_models: draft.allowed_models,
       allow_self_key: draft.allow_self_key,
     };
     try {
@@ -216,13 +230,51 @@ export default function TenantsPage() {
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="t-models">allowed models (comma separated)</Label>
-                  <Input
-                    id="t-models"
-                    placeholder="gpt-4o, claude-sonnet — empty = all"
-                    value={draft.allowed_models}
-                    onChange={(e) => setDraft({ ...draft, allowed_models: e.target.value })}
-                  />
+                  <Label htmlFor="t-models">allowed models</Label>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        id="t-models"
+                        className="w-full justify-between font-mono text-[12px] font-normal"
+                      >
+                        <span className="truncate">
+                          {draft.allowed_models.length === 0
+                            ? "all models"
+                            : draft.allowed_models.join(", ")}
+                        </span>
+                        <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-50" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent className="max-h-64 w-[var(--radix-dropdown-menu-trigger-width)] min-w-[12rem] overflow-y-auto">
+                      {availableModels.length === 0 ? (
+                        <div className="px-2 py-1.5 font-mono text-[12px] text-muted-foreground">
+                          no models configured
+                        </div>
+                      ) : (
+                        availableModels.map((model) => (
+                          <DropdownMenuCheckboxItem
+                            key={model}
+                            checked={draft.allowed_models.includes(model)}
+                            onCheckedChange={() =>
+                              setDraft({
+                                ...draft,
+                                allowed_models: toggleModel(draft.allowed_models, model),
+                              })
+                            }
+                            onSelect={(e) => e.preventDefault()}
+                          >
+                            {model}
+                          </DropdownMenuCheckboxItem>
+                        ))
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                  <div className="font-mono text-[10px] text-muted-foreground/60">
+                    empty selection = all models allowed
+                  </div>
                 </div>
                 <div className="flex items-center justify-between rounded-sm border border-border px-3 py-2.5">
                   <div>
