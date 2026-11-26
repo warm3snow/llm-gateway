@@ -50,7 +50,7 @@ make dev
 
 - 后端 API：`http://localhost:8080`
 - 前端控制台：`http://localhost:3000`
-- 默认管理员：`admin / admin123`（生产环境请修改）
+- 默认管理员：`admin@llmgw.org / admin123`（生产环境请修改）
 
 也可以后台启动：
 

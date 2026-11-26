@@ -232,7 +232,7 @@ func setDefaults(v *viper.Viper) {
 
 	v.SetDefault("security.apiKeyHeader", "x-llm-gateway-api-key")
 	v.SetDefault("security.allowedOrigins", []string{"*"})
-	v.SetDefault("security.adminUser", "admin")
+	v.SetDefault("security.adminUser", "admin@llmgw.org")
 	v.SetDefault("security.adminPass", "admin123")
 	v.SetDefault("security.jwtSecret", "llm-gateway-secret-change-in-production")
 	v.SetDefault("security.encryptionKey", "")

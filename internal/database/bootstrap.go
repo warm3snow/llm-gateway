@@ -45,9 +45,17 @@ func Bootstrap(adminUser, adminPass string) error {
 		return err
 	}
 
-	// 2. Super-admin user from config credentials.
+	// 2. Super-admin user from config credentials. The login identity is the
+	// email, so both username and email use admin@llmgw.org by default.
+	adminEmail := models.NormalizeEmail(adminUser)
+	if !models.ValidEmail(adminEmail) {
+		adminEmail = adminEmail + "@" + models.EmailDomain
+	}
+
 	var count int64
-	if err := DB.Model(&models.User{}).Where("username = ?", adminUser).Count(&count).Error; err != nil {
+	if err := DB.Model(&models.User{}).
+		Where("username = ? OR LOWER(email) = ?", adminEmail, adminEmail).
+		Count(&count).Error; err != nil {
 		return err
 	}
 	if count == 0 {
@@ -57,8 +65,8 @@ func Bootstrap(adminUser, adminPass string) error {
 		}
 		admin := models.User{
 			TenantID:     nil, // super_admin is not bound to a tenant
-			Username:     adminUser,
-			Email:        models.NormalizeEmail(adminUser) + "@" + models.EmailDomain,
+			Username:     adminEmail,
+			Email:        adminEmail,
 			PasswordHash: string(hash),
 			Role:         models.RoleSuperAdmin,
 			Status:       "active",
@@ -66,7 +74,7 @@ func Bootstrap(adminUser, adminPass string) error {
 		if err := DB.Create(&admin).Error; err != nil {
 			return err
 		}
-		log.Printf("[BOOTSTRAP] Created super_admin user %q", adminUser)
+		log.Printf("[BOOTSTRAP] Created super_admin user %q", adminEmail)
 	}
 
 	return nil

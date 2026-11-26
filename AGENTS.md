@@ -182,7 +182,7 @@ func (h *StatsHandler) RegisterRoutesWithAuth(router, jwtMiddleware) { ... }
 1. **Backend:** Go 1.21+; copy `configs/config.yaml` and set env vars for API keys
 2. **Frontend:** Node.js 18+; `cd web/frontend && npm install`
 3. **Database:** SQLite (default, auto-created as `llm-gateway.db`); PostgreSQL supported via `database.driver: "postgres"`
-4. **Default admin login:** `username: admin`, `password: admin123` (change via `security.adminPass` in config)
+4. **Default admin login:** `admin@llmgw.org`, password `admin123` (change via `security.adminUser` / `security.adminPass` in config)
 
 ---
 

@@ -41,7 +41,7 @@ func TestConfig(t *testing.T) *config.Config {
 		Security: config.SecurityConfig{
 			APIKeyHeader:   "x-llm-gateway-api-key",
 			AllowedOrigins: []string{"*"},
-			AdminUser:      "admin",
+			AdminUser:      "admin@llmgw.org",
 			AdminPass:      "admin123",
 			JWTSecret:      "test-secret",
 		},

@@ -41,7 +41,12 @@ func Authorize(req *http.Request, token string) {
 	req.Header.Set("Authorization", "Bearer "+token)
 }
 
-// AdminEmail returns the bootstrap super_admin's login email for a username.
-func AdminEmail(username string) string {
-	return strings.ToLower(strings.TrimSpace(username)) + "@" + models.EmailDomain
+// AdminEmail returns the bootstrap super_admin's login email. A bare username
+// maps to name@llmgw.org; a configured email is returned unchanged.
+func AdminEmail(adminUser string) string {
+	user := strings.ToLower(strings.TrimSpace(adminUser))
+	if models.ValidEmail(user) {
+		return user
+	}
+	return user + "@" + models.EmailDomain
 }

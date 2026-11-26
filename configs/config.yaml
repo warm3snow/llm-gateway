@@ -64,6 +64,6 @@ security:
     apiKeyHeader: x-llm-gateway-api-key
     allowedOrigins:
         - '*'
-    adminUser: admin
+    adminUser: admin@llmgw.org
     adminPass: admin123
     jwtSecret: llm-gateway-secret-change-in-production

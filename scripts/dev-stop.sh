@@ -30,9 +30,9 @@ is_candidate() {
   case "$cmd" in
     *"$FRONTEND_DIR"*|*"$BASE_DIR"*) return 0 ;;
   esac
-  # `go run` compiles the server into the Go build cache and execs it from
-  # there: .../go-build/aa/<hash>-d/server (or .../exe/server).
-  if printf '%s' "$cmd" | grep -Eq '/go-build/.*/(server|llm-gateway)( .*)?$'; then
+  # `go run` compiles the server and execs it from the build cache or a temp
+  # dir: .../go-build/aa/<hash>-d/server, $TMPDIR/go-build*/b001/exe/server.
+  if printf '%s' "$cmd" | grep -Eq '/go-build[^/]*/(.*/)?(server|llm-gateway)( .*)?$'; then
     return 0
   fi
   # A listener on our port running a dev server is ours too.
@@ -66,7 +66,7 @@ done
 
 # 3. The backend binary spawned by `go run` (its path lives in the go build
 #    cache, so it is matched by name rather than by repository path).
-for pid in $(ps -eo pid=,command= | grep -E '/go-build/.*/(server|llm-gateway)( |$)' | grep -v 'dev-stop.sh' | awk '{print $1}'); do
+for pid in $(ps -eo pid=,command= | grep -E '/go-build[^/]*/(.*/)?(server|llm-gateway)( |$)' | grep -v 'dev-stop.sh' | awk '{print $1}'); do
   add_pid "$pid"
 done
 

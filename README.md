@@ -50,7 +50,7 @@ make dev
 
 - Backend API: `http://localhost:8080`
 - Admin dashboard: `http://localhost:3000`
-- Default admin user: `admin / admin123` (change this in production)
+- Default admin account: `admin@llmgw.org / admin123` (change this in production)
 
 Run in the background:
 
