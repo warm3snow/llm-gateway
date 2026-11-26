@@ -43,12 +43,12 @@ func TestVirtualKeyAuthIncludesPendingBudget(t *testing.T) {
 	}
 
 	router := gin.New()
-	router.Use(VirtualKeyAuthWithBudgetTracker(&config.Config{Security: config.SecurityConfig{APIKeyHeader: "x-llm-gateway-api-key"}}, tracker))
+	router.Use(VirtualKeyAuthWithBudgetTracker(&config.Config{}, tracker))
 	router.GET("/v1/test", func(c *gin.Context) { c.Status(http.StatusNoContent) })
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/v1/test", nil)
-	req.Header.Set("x-llm-gateway-api-key", plainKey)
+	req.Header.Set("Authorization", "Bearer "+plainKey)
 	router.ServeHTTP(w, req)
 
 	if w.Code != http.StatusPaymentRequired {

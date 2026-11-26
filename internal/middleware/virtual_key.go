@@ -21,18 +21,15 @@ import (
 	"gorm.io/gorm"
 )
 
-// VirtualKeyAuth validates virtual keys from request headers.
-// The header name is read from cfg.Security.APIKeyHeader (default: x-llm-gateway-api-key).
-// If a valid key is found, it sets "virtual_key_id" and "virtual_key_name" in the context.
+// VirtualKeyAuth validates virtual keys from the Authorization header.
+// Virtual keys are sent as `Authorization: Bearer <virtual-key>`, matching the
+// OpenAI API convention. If a valid key is found, it sets "virtual_key_id" and
+// "virtual_key_name" in the context.
 func VirtualKeyAuth(cfg *config.Config) gin.HandlerFunc {
 	return VirtualKeyAuthWithBudgetTracker(cfg, nil)
 }
 
 func VirtualKeyAuthWithBudgetTracker(cfg *config.Config, budgetTracker *service.BudgetTracker) gin.HandlerFunc {
-	headerName := "x-llm-gateway-api-key"
-	if cfg != nil && cfg.Security.APIKeyHeader != "" {
-		headerName = cfg.Security.APIKeyHeader
-	}
 	authCache := newVirtualKeyAuthCache(5*time.Minute, 10*time.Second)
 
 	return func(c *gin.Context) {
@@ -55,25 +52,20 @@ func VirtualKeyAuthWithBudgetTracker(cfg *config.Config, budgetTracker *service.
 			metrics.RecordVirtualKeyAuth(middlewareMetricEndpoint(c), metricResult, activeKeysLoaded, time.Since(start))
 		}
 
-		// Read the virtual key from the configured header. Standard clients
-		// speak `Authorization: Bearer <key>` or `x-api-key` (Anthropic); a
-		// Bearer token that matches no JWT is treated as a virtual key so the
-		// gateway works with unmodified OpenAI/Anthropic SDKs.
-		vk := c.GetHeader(headerName)
-		if vk == "" {
-			if auth := c.GetHeader("Authorization"); len(auth) > 7 && (auth[:7] == "Bearer " || auth[:7] == "bearer ") {
-				vk = strings.TrimSpace(auth[7:])
-			}
-		}
-		if vk == "" {
-			vk = c.GetHeader("x-api-key")
+		// Read the virtual key from the Authorization header. OpenAI-compatible
+		// clients already send `Authorization: Bearer <key>`; the gateway
+		// distinguishes virtual keys from admin JWTs by matching against the
+		// virtual-key store.
+		var vk string
+		if auth := c.GetHeader("Authorization"); len(auth) > 7 && (auth[:7] == "Bearer " || auth[:7] == "bearer ") {
+			vk = strings.TrimSpace(auth[7:])
 		}
 
 		if vk == "" {
 			metricResult = "missing_key"
 			// No virtual key provided - reject
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"error":  "Missing virtual key. Provide it via the " + headerName + " header.",
+				"error":  "Missing virtual key. Provide it via the Authorization: Bearer header.",
 				"status": "error",
 			})
 			recordMetric()

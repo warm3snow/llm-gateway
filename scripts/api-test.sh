@@ -92,9 +92,10 @@ call_status() {
     local full_url="${BASE_URL}${url}"
     local curl_cmd="curl -s -o /dev/null -w %{http_code} -X ${method}"
     curl_cmd+=" -H 'Content-Type: application/json'"
-    [ -n "$token" ]   && curl_cmd+=" -H 'Authorization: Bearer ${token}'"
-    if [ -n "$api_key" ]; then
-        curl_cmd+=" -H 'x-llm-gateway-api-key: ${api_key}'"
+    if [ -n "$token" ]; then
+        curl_cmd+=" -H 'Authorization: Bearer ${token}'"
+    elif [ -n "$api_key" ]; then
+        curl_cmd+=" -H 'Authorization: Bearer ${api_key}'"
         curl_cmd+=" -H 'x-llm-provider: ${PROXY_PROVIDER:-ollama}'"
     fi
     [ -n "$body" ]    && curl_cmd+=" -d '${body}'"
@@ -108,9 +109,10 @@ call_body() {
     local full_url="${BASE_URL}${url}"
     local curl_cmd="curl -s -X ${method}"
     curl_cmd+=" -H 'Content-Type: application/json'"
-    [ -n "$token" ]   && curl_cmd+=" -H 'Authorization: Bearer ${token}'"
-    if [ -n "$api_key" ]; then
-        curl_cmd+=" -H 'x-llm-gateway-api-key: ${api_key}'"
+    if [ -n "$token" ]; then
+        curl_cmd+=" -H 'Authorization: Bearer ${token}'"
+    elif [ -n "$api_key" ]; then
+        curl_cmd+=" -H 'Authorization: Bearer ${api_key}'"
         curl_cmd+=" -H 'x-llm-provider: ${PROXY_PROVIDER:-ollama}'"
     fi
     [ -n "$body" ]    && curl_cmd+=" -d '${body}'"

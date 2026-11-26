@@ -37,7 +37,7 @@ func TestStreamedChatCompletionRecordsUsage(t *testing.T) {
 			{"role": "user", "content": "ping"},
 		},
 	})
-	req.Header.Set(cfg.Security.APIKeyHeader, virtualKey)
+	req.Header.Set("Authorization", "Bearer "+virtualKey)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
@@ -89,7 +89,7 @@ func TestAnthropicMessagesEndpoint(t *testing.T) {
 			{"role": "user", "content": "hello"},
 		},
 	})
-	req.Header.Set("x-api-key", virtualKey)
+	req.Header.Set("Authorization", "Bearer "+virtualKey)
 	req.Header.Set("anthropic-version", "2023-06-01")
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)

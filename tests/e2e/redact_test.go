@@ -113,7 +113,7 @@ func TestRedactMasksRequestAndRestoresResponse(t *testing.T) {
 			{"role": "user", "content": "my key is " + secret + " please keep it"},
 		},
 	})
-	req.Header.Set(cfg.Security.APIKeyHeader, virtualKey)
+	req.Header.Set("Authorization", "Bearer "+virtualKey)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
@@ -146,7 +146,7 @@ func TestRedactDisabledLeavesValuesInPlace(t *testing.T) {
 			{"role": "user", "content": "my key is " + secret},
 		},
 	})
-	req.Header.Set(cfg.Security.APIKeyHeader, virtualKey)
+	req.Header.Set("Authorization", "Bearer "+virtualKey)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())

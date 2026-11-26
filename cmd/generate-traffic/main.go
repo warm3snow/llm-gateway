@@ -524,7 +524,7 @@ func detectModel(ctx context.Context, client *http.Client, baseURL, provider, ke
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("x-llm-gateway-api-key", key)
+	req.Header.Set("Authorization", "Bearer "+key)
 	req.Header.Set("x-llm-provider", provider)
 	resp, err := client.Do(req)
 	if err != nil {
@@ -567,7 +567,7 @@ func sendChat(ctx context.Context, client *http.Client, baseURL, provider string
 		return failedResult(err, started, key.Name)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-llm-gateway-api-key", key.Key)
+	req.Header.Set("Authorization", "Bearer "+key.Key)
 	req.Header.Set("x-llm-provider", provider)
 	resp, err := client.Do(req)
 	if err != nil {

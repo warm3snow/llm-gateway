@@ -14,7 +14,7 @@ Default base URL: `http://localhost:8080`.
 Use a virtual key for `/v1/*` requests:
 
 ```http
-x-llm-gateway-api-key: <virtual-key>
+Authorization: Bearer <virtual-key>
 ```
 
 ### Admin API
@@ -49,11 +49,9 @@ Emails follow `local@domain` and are shown in the console as e.g. `user123456@ll
 
 ### Authentication headers
 
-The virtual key can be supplied with any of:
+Virtual keys are supplied with the OpenAI-standard header:
 
-- `x-llm-gateway-api-key: <virtual-key>` (configurable via `security.apiKeyHeader`)
-- `Authorization: Bearer <virtual-key>` (OpenAI/Anthropic SDK compatible)
-- `x-api-key: <virtual-key>` (Anthropic client compatible)
+- `Authorization: Bearer <virtual-key>`
 
 `/v1/chat/completions` serves both buffered and streamed requests: send `"stream": true` and the gateway replies with OpenAI-format SSE, regardless of the upstream provider's native protocol (Anthropic and Gemini streams are translated). Anthropic clients should call `/v1/messages` instead and receive Anthropic-format SSE.
 

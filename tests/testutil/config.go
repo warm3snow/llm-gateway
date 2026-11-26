@@ -39,7 +39,6 @@ func TestConfig(t *testing.T) *config.Config {
 			LogLevel: "silent",
 		},
 		Security: config.SecurityConfig{
-			APIKeyHeader:   "x-llm-gateway-api-key",
 			AllowedOrigins: []string{"*"},
 			AdminUser:      "admin@llmgw.org",
 			AdminPass:      "admin123",

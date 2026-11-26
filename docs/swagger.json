@@ -1641,9 +1641,9 @@
             "in": "header"
         },
         "VirtualKeyAuth": {
-            "description": "Virtual key for API access",
+            "description": "Virtual key: \"Bearer\" followed by a space and the virtual key",
             "type": "apiKey",
-            "name": "x-llm-gateway-api-key",
+            "name": "Authorization",
             "in": "header"
         }
     }

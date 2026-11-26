@@ -105,7 +105,7 @@ func TestAdminCreatesVirtualKeyAndProxiesChatCompletion(t *testing.T) {
 		"model":    "gpt-test",
 		"messages": []gin.H{{"role": "user", "content": "ping"}},
 	})
-	chatReq.Header.Set(cfg.Security.APIKeyHeader, createKeyRes.Key.Key)
+	chatReq.Header.Set("Authorization", "Bearer "+createKeyRes.Key.Key)
 	chat := httptest.NewRecorder()
 	router.ServeHTTP(chat, chatReq)
 

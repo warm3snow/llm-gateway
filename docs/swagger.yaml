@@ -1069,8 +1069,8 @@ securityDefinitions:
     name: Authorization
     type: apiKey
   VirtualKeyAuth:
-    description: Virtual key for API access
+    description: 'Virtual key: "Bearer" followed by a space and the virtual key'
     in: header
-    name: x-llm-gateway-api-key
+    name: Authorization
     type: apiKey
 swagger: "2.0"

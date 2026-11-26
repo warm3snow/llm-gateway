@@ -28,7 +28,6 @@ logging:
     format: json
     outputPath: stdout
 security:
-    apiKeyHeader: x-llm-gateway-api-key
     allowedOrigins:
         - '*'
     adminUser: admin@llmgw.org

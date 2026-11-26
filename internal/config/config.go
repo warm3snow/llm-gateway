@@ -135,7 +135,6 @@ type LoggingConfig struct {
 
 // SecurityConfig 安全配置
 type SecurityConfig struct {
-	APIKeyHeader   string   `mapstructure:"apiKeyHeader" json:"apiKeyHeader" yaml:"apiKeyHeader"`
 	AllowedOrigins []string `mapstructure:"allowedOrigins" json:"allowedOrigins" yaml:"allowedOrigins"`
 	AdminUser      string   `mapstructure:"adminUser" json:"adminUser" yaml:"adminUser"`
 	AdminPass      string   `mapstructure:"adminPass" json:"adminPass" yaml:"adminPass"`
@@ -232,7 +231,6 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("logging.format", "json")
 	v.SetDefault("logging.outputPath", "stdout")
 
-	v.SetDefault("security.apiKeyHeader", "x-llm-gateway-api-key")
 	v.SetDefault("security.allowedOrigins", []string{"*"})
 	v.SetDefault("security.adminUser", "admin@llmgw.org")
 	v.SetDefault("security.adminPass", "admin123")

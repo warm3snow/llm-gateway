@@ -65,7 +65,7 @@ make seed
 ```bash
 curl -X POST http://localhost:18080/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "x-llm-gateway-api-key: your-virtual-key" \
+  -H "Authorization: Bearer your-virtual-key" \
   -d '{
     "model": "qwen2.5:7b",
     "messages": [{"role": "user", "content": "Hello!"}]
@@ -98,7 +98,7 @@ Client
 
 - [API Reference](docs/api.md)（英文）
 - OpenAI-compatible 接口：`/v1/chat/completions`、`/v1/completions`、`/v1/embeddings`、`/v1/models`、`/v1/images/generations`、`/v1/audio/*`、`/v1/messages`（Anthropic-compatible），以及通用代理 `/v1/proxy/*path`
-- OpenAI-compatible API 使用 `x-llm-gateway-api-key` 虚拟密钥认证（也支持 `Authorization: Bearer <virtual-key>` 和 `x-api-key`）
+- OpenAI-compatible API 使用标准 `Authorization: Bearer <virtual-key>` 认证虚拟密钥
 - Admin API 使用 `Authorization: Bearer <token>` JWT 认证
 
 ## 核心能力

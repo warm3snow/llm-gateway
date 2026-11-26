@@ -106,7 +106,7 @@ func (h *StatsHandler) RegisterRoutesWithAuth(router, jwtMiddleware) { ... }
 
 | Middleware | Applies To | Purpose |
 |---|---|---|
-| `middleware.VirtualKeyAuth()` | `/v1/*` (proxy routes) | Validates virtual key from `x-llm-gateway-api-key` header |
+| `middleware.VirtualKeyAuth()` | `/v1/*` (proxy routes) | Validates virtual key from the `Authorization: Bearer` header |
 | `middleware.JWTAuth(cfg)` | `/api/v1/*` (admin routes) | Validates JWT Bearer token for admin API access |
 
 ### Configuration (`internal/config/config.go`)

@@ -163,7 +163,7 @@ func doChatCompletion(t *testing.T, router *gin.Engine, cfg *config.Config, virt
 		"model":    "gpt-test",
 		"messages": []gin.H{{"role": "user", "content": "ping"}},
 	})
-	req.Header.Set(cfg.Security.APIKeyHeader, virtualKey)
+	req.Header.Set("Authorization", "Bearer "+virtualKey)
 	for key, value := range extraHeaders {
 		req.Header.Set(key, value)
 	}

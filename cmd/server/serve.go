@@ -71,8 +71,8 @@ var startTime = time.Now()
 
 // @securityDefinitions.apikey VirtualKeyAuth
 // @in header
-// @name x-llm-gateway-api-key
-// @description Virtual key for API access
+// @name Authorization
+// @description Virtual key: "Bearer" followed by a space and the virtual key
 
 func newServeCmd() *cobra.Command {
 	cmd := &cobra.Command{

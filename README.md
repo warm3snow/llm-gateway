@@ -65,7 +65,7 @@ Create a virtual key in the dashboard, then use it with the OpenAI-compatible AP
 ```bash
 curl -X POST http://localhost:18080/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "x-llm-gateway-api-key: your-virtual-key" \
+  -H "Authorization: Bearer your-virtual-key" \
   -d '{
     "model": "qwen2.5:7b",
     "messages": [{"role": "user", "content": "Hello!"}]
@@ -98,7 +98,7 @@ Requests with `model: "auto"` are scored across enabled provider/model pairs (co
 
 - [API Reference](docs/api.md)
 - OpenAI-compatible endpoints: `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings`, `/v1/models`, `/v1/images/generations`, `/v1/audio/*`, `/v1/messages` (Anthropic-compatible), and a generic `/v1/proxy/*path`
-- OpenAI-compatible APIs use the `x-llm-gateway-api-key` virtual key header (`Authorization: Bearer <virtual-key>` and `x-api-key` also work)
+- Virtual keys authenticate via the standard OpenAI-style `Authorization: Bearer <virtual-key>` header
 - Admin APIs use `Authorization: Bearer <token>` JWT authentication
 
 ## Core Capabilities

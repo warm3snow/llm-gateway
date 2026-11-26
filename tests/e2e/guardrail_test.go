@@ -132,7 +132,7 @@ func createGuardrailVirtualKey(t *testing.T, router *gin.Engine, cfg *config.Con
 func doGuardrailRequest(t *testing.T, router *gin.Engine, cfg *config.Config, virtualKey, path string, body any) *httptest.ResponseRecorder {
 	t.Helper()
 	req := testutil.NewJSONRequest(t, http.MethodPost, path, body)
-	req.Header.Set(cfg.Security.APIKeyHeader, virtualKey)
+	req.Header.Set("Authorization", "Bearer "+virtualKey)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	return w
