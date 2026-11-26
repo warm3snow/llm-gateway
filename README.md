@@ -76,7 +76,64 @@ Set `"model": "auto"` (or omit it) to let the gateway pick a provider/model by c
 
 ## Architecture
 
-<img width="3016" height="578" alt="Clipboard_Screenshot_1783826119" src="https://github.com/user-attachments/assets/9cce1e55-958f-4204-9589-60d211bae4db" />
+```mermaid
+flowchart LR
+    SDK["OpenAI SDK / HTTP Client"]
+    DASH["Next.js Admin Dashboard"]
+
+    subgraph GW["LLM Gateway · Gin"]
+        direction LR
+        AUTH["Virtual Key Auth<br/>key → user → tenant quota"]
+        PIPE["Redact → Guardrail → Idempotency<br/>→ Cache → Usage Record"]
+        ROUTE["Model Selection (auto)<br/>→ Fallback Chain"]
+        PROXY["Proxy Handler<br/>→ Provider Adapters"]
+        ADMIN["JWT Auth<br/>/api/v1/*"]
+        AUTH --> PIPE --> ROUTE --> PROXY
+    end
+
+    subgraph UP["Upstream LLM APIs"]
+        direction TB
+        P1["OpenAI · Anthropic · Gemini"]
+        P2["Azure · DeepSeek · Groq"]
+        P3["Mistral · Kimi · GLM · Cohere"]
+        P4["Ollama / self-hosted"]
+    end
+
+    subgraph ST["State & Observability"]
+        direction TB
+        DB[("SQLite / PostgreSQL")]
+        REDIS[("Redis")]
+        OBS["Prometheus · Logs · Analytics"]
+    end
+
+    SDK -->|"Bearer virtual key"| AUTH
+    DASH -->|"Bearer JWT"| ADMIN
+    PROXY --> P1 & P2 & P3 & P4
+    ADMIN --> DB
+    PIPE -.-> REDIS
+    PIPE -.-> DB
+    PROXY -.-> OBS
+
+    classDef client fill:#E8F0FE,stroke:#1A73E8,stroke-width:1.5px,color:#0B3D91
+    classDef edge fill:#FFF4E5,stroke:#E8710A,stroke-width:1.5px,color:#7A3E00
+    classDef pipe fill:#E6F4EA,stroke:#1E8E3E,stroke-width:1.5px,color:#0B4F1C
+    classDef route fill:#F3E8FD,stroke:#8430CE,stroke-width:1.5px,color:#4A148C
+    classDef core fill:#E4F7FB,stroke:#0B8043,stroke-width:1.5px,color:#004D40
+    classDef upstream fill:#FCE8E6,stroke:#D93025,stroke-width:1.5px,color:#8C1D18
+    classDef data fill:#F1F3F4,stroke:#5F6368,stroke-width:1.5px,color:#202124
+
+    class SDK,DASH client
+    class AUTH,ADMIN edge
+    class PIPE pipe
+    class ROUTE route
+    class PROXY core
+    class P1,P2,P3,P4 upstream
+    class DB,REDIS,OBS data
+
+    style GW fill:#FCFCFD,stroke:#1A73E8,stroke-width:1px,stroke-dasharray:4 3
+    style UP fill:#FEF8F7,stroke:#D93025,stroke-width:1px,stroke-dasharray:4 3
+    style ST fill:#FAFAFA,stroke:#5F6368,stroke-width:1px,stroke-dasharray:4 3
+```
 
 ### Request flow
 
